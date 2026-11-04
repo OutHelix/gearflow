@@ -1,0 +1,1 @@
+"""Packaged Bash workflow resources."""

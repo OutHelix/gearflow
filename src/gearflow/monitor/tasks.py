@@ -1,0 +1,859 @@
+import argparse
+import json
+import math
+import re
+import shutil
+import sys
+import time
+import urllib.parse
+from collections import Counter, deque
+from datetime import date, datetime, timedelta, timezone
+from enum import Enum
+
+from . import task_status
+from .common import (
+    CheckError,
+    clean,
+    color_enabled,
+    maintainer_login,
+    output_arguments,
+    paint,
+    positive,
+)
+from .output import wrapped_parts
+from .watch import WatchQuit, check_quit, wait, watch_input
+from .workers import receive_worker, request_worker, start_worker, stop_workers
+
+API = "https://git.altlinux.org/tasks/api"
+ARCHITECTURES = ("x86_64", "i586", "aarch64")
+STATE_COLORS = {
+    "NEW": "36",
+    "AWAITING": "36",
+    "PENDING": "36",
+    "BUILDING": "1;36",
+    "COMMITTING": "1;35",
+    "TESTED": "32",
+    "FAILING": "1;31",
+    "FAILED": "1;31",
+    "DONE": "32",
+    "SWEPT": "90",
+    "EPERM": "1;33",
+    "POSTPONED": "35",
+}
+
+
+class ArchStatus(Enum):
+    SUCCESS = "built/cached"
+    FAILED = "failed"
+    EXCLUDED = "excluded"
+    SKIPPED = "skipped"
+    WAITING = "waiting"
+    MISSING = "no data"
+    UNKNOWN = "unknown"
+
+
+def task_clean(value):
+    return clean(re.sub(r"[\u202a-\u202e\u2066-\u2069]", " ", str(value)))
+
+
+def subtask_approvals(subtask):
+    result = dict(subtask)
+    for field, comments in (
+        ("approved_by", "approval_comments"),
+        ("disapproved_by", "disapproval_comments"),
+    ):
+        if field in result or not isinstance(result.get(comments), dict):
+            continue
+        users = [
+            name
+            for name, comment in result[comments].items()
+            if isinstance(name, str) and task_clean(name) and isinstance(comment, dict)
+        ]
+        if users:
+            result[field] = users
+    return result
+
+
+def normalize(value):
+    if not isinstance(value, dict):
+        raise CheckError("expected a task object")
+    task = dict(value)
+    identifier = task.get("id")
+    if identifier is None or identifier is False:
+        identifier = task.get("taskid")
+    if (
+        isinstance(identifier, bool)
+        or not isinstance(identifier, (int, float))
+        or (isinstance(identifier, float) and not math.isfinite(identifier))
+        or identifier <= 0
+        or int(identifier) != identifier
+    ):
+        raise CheckError("invalid or missing task ID")
+    task["id"] = int(identifier)
+    if any(
+        not isinstance(task.get(key), str) or not task[key]
+        for key in ("owner", "state", "repo")
+    ):
+        raise CheckError("missing owner/state/repo")
+    if task.get("subtasks") is not None and not isinstance(task["subtasks"], dict):
+        raise CheckError("invalid subtasks")
+    if isinstance(task.get("subtasks"), dict):
+        task["subtasks"] = {
+            number: subtask_approvals(subtask) if isinstance(subtask, dict) else subtask
+            for number, subtask in task["subtasks"].items()
+        }
+    for key in ("created", "build_time"):
+        if task.get(key) is not None and not isinstance(task[key], str):
+            raise CheckError("invalid task date")
+    task["state"] = task_clean(task["state"]).upper()
+    return task
+
+
+def package_name(subtask):
+    if subtask.get("pkgname"):
+        name = subtask["pkgname"]
+    elif subtask.get("dir"):
+        name = str(subtask["dir"]).rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+    elif subtask.get("srpm"):
+        name = str(subtask["srpm"]).rsplit("/", 1)[-1]
+        name = re.sub(r"-[^-]+-[^-]+\.src\.rpm$", "", name)
+        name = re.sub(r"\.src\.rpm$", "", name)
+    else:
+        name = "(unknown package)"
+    return task_clean(name)
+
+
+def package_rows(task, source=False):
+    subtasks = task.get("subtasks") or {}
+
+    def order(item):
+        try:
+            number = float(item[0])
+        except ValueError:
+            number = 999999999
+        return number, item[0]
+
+    rows = []
+    for number, subtask in sorted(subtasks.items(), key=order):
+        if not isinstance(subtask, dict) or not any(
+            subtask.get(key) for key in ("type", "pkgname", "dir", "srpm")
+        ):
+            continue
+        name = package_name(subtask)
+        if source:
+            info = source_info(task, number, subtask)
+            subtask = dict(subtask, source=info)
+            name += " [" + info["label"] + "]"
+        rows.append((task_clean(number), name, subtask))
+    return rows
+
+
+def packages(task):
+    return sorted(
+        {name for _, name, _ in package_rows(task)}, key=lambda s: (s.lower(), s)
+    )
+
+
+def source_info(task, number, subtask):
+    subtask = subtask or {}
+    kind = subtask.get("type")
+    if kind == "repo" and subtask.get("dir"):
+        label = task_clean(str(subtask["dir"]).rstrip("/").rsplit("/", 1)[-1])
+        if subtask.get("tag_name"):
+            label += "=" + task_clean(subtask["tag_name"])
+        filename = "git"
+    elif kind == "srpm" and subtask.get("srpm"):
+        label = task_clean(str(subtask["srpm"]).rsplit("/", 1)[-1])
+        filename = urllib.parse.quote(label, safe="")
+    else:
+        label = "not available"
+        if kind == "copy":
+            label = (
+                "copy from " + task_clean(subtask["copy_repo"])
+                if subtask.get("copy_repo")
+                else "copy (source branch unavailable)"
+            )
+        elif kind == "delete":
+            label = "not applicable (delete)"
+        return {"label": label, "url": None}
+    number = urllib.parse.quote(str(number), safe="")
+    return {
+        "label": label,
+        "url": f"https://git.altlinux.org/tasks/{task['id']}/gears/{number}/{filename}",
+    }
+
+
+def with_sources(task):
+    result = dict(task, subtasks=dict(task.get("subtasks") or {}))
+    for number, subtask in result["subtasks"].items():
+        if isinstance(subtask, dict) and any(
+            subtask.get(key) for key in ("type", "pkgname", "dir", "srpm")
+        ):
+            result["subtasks"][number] = dict(
+                subtask, source=source_info(task, number, subtask)
+            )
+    return result
+
+
+def arch_status(subtask, architecture):
+    if subtask is None:
+        return ArchStatus.MISSING
+    build = subtask.get("build")
+    status = build.get(architecture) if isinstance(build, dict) else None
+    if status in ("built", "cached"):
+        return ArchStatus.SUCCESS
+    if status == "failed":
+        return ArchStatus.FAILED
+    if status == "excluded":
+        return ArchStatus.EXCLUDED
+    if status == "swept":
+        return ArchStatus.SKIPPED
+    if status in (None, ""):
+        return (
+            ArchStatus.SKIPPED
+            if subtask.get("type") in ("copy", "delete")
+            else ArchStatus.MISSING
+        )
+    if status in ("pending", "waiting", "building", "awaiting", "new"):
+        return ArchStatus.WAITING
+    return ArchStatus.UNKNOWN
+
+
+def package_matches(name, pattern):
+    name, pattern = name.lower(), pattern.lower()
+
+    if "*" in pattern or "?" in pattern:
+        expression = "".join(
+            ".*" if c == "*" else "." if c == "?" else re.escape(c) for c in pattern
+        )
+        return re.fullmatch(expression, name) is not None
+    return pattern in name
+
+
+def task_time(task):
+    try:
+        value = datetime.fromisoformat(
+            (task.get("build_time") or "").replace("Z", "+00:00")
+        )
+    except ValueError:
+        value = datetime.min
+    return (
+        value.replace(tzinfo=timezone.utc)
+        if value.tzinfo is None
+        else value.astimezone(timezone.utc)
+    )
+
+
+def select_tasks(values, args):
+    if not isinstance(values, list):
+        raise CheckError("API response must be a task array")
+    selected = []
+    for raw in values:
+        task = normalize(raw)
+        if task["owner"].lower() != args.maintainer:
+            continue
+        if args.branch != "ALL" and task["repo"].lower() not in args.branch.split(","):
+            continue
+        excluded_state = (
+            task["state"] not in args.state if args.state else task["state"] == "DONE"
+        )
+        if excluded_state:
+            continue
+        if args.package and not any(
+            package_matches(name, pattern)
+            for name in packages(task)
+            for pattern in args.package
+        ):
+            continue
+        if args.since and (
+            not task.get("created") or task["created"][:10] < args.since
+        ):
+            continue
+        selected.append(task)
+
+    def key(task):
+        if args.sort == "time":
+            return task_time(task), task["id"]
+        if args.sort == "id":
+            return task["id"]
+        if args.sort == "package":
+            names = packages(task)
+            return (names[0].lower() if names else "~"), task["id"]
+        field = "repo" if args.sort == "branch" else "state"
+        return task[field].lower(), task["id"]
+
+    return sorted(
+        selected, key=key, reverse=(args.sort in ("time", "id")) != args.reverse
+    )
+
+
+def uint(value):
+    if not re.fullmatch(r"[0-9]{1,9}", value):
+        raise argparse.ArgumentTypeError(
+            "must be a non-negative integer (at most 9 digits)"
+        )
+    return int(value)
+
+
+def configure_parser(parser):
+    parser.description = (
+        "List Girar tasks owned by a specific maintainer, or use show ID for one task. "
+        "Defaults for lists: all branches, "
+        "all states except DONE, latest build log first. Package filters select tasks; all "
+        "their packages remain visible. Output adapts to terminal width. "
+        "Stages appear for BUILDING and failed checks for FAILED tasks. "
+        "TEST means no automatic commit."
+    )
+    parser.epilog = (
+        "Only tasks still available in the API are listed; this is not a complete archive. "
+        "Exit codes: 0 success (including no matches), 1 API/detail error, 2 invalid options. "
+        "Architecture colors: green built/cached, red failed, gray skipped/waiting/no data/unknown; "
+        "excluded architectures are gray and struck through."
+    )
+    if hasattr(parser, "color"):
+        parser.color = False
+    parser.add_argument(
+        "-m",
+        "--maintainer",
+        type=maintainer_login,
+        help="task owner, not subtask author or package ACL member; required for lists",
+    )
+    parser.add_argument(
+        "-b",
+        "-r",
+        "--branch",
+        "--repo",
+        default="ALL",
+        help="branch, comma-separated branches or ALL (default: ALL)",
+    )
+    parser.add_argument(
+        "-s",
+        "--state",
+        action="append",
+        default=[],
+        help="comma-separated states; repeatable; explicitly select DONE here",
+    )
+    parser.add_argument(
+        "-p",
+        "--package",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="case-insensitive substring or quoted '*'/'?' glob; repeatable (OR)",
+    )
+    parser.add_argument(
+        "-n",
+        "--limit",
+        type=uint,
+        default=0,
+        help="first N tasks after selection/sorting; 0 means all",
+    )
+    parser.add_argument(
+        "--days",
+        type=positive,
+        help="creation date in last N local calendar days, including today",
+    )
+    parser.add_argument(
+        "--sort",
+        choices=("time", "id", "package", "state", "branch"),
+        default="time",
+        help="time: latest build log first, missing dates last; id: newest task first; other fields alphabetical (default: time)",
+    )
+    parser.add_argument(
+        "--reverse", action="store_true", help="reverse the chosen sort order"
+    )
+    parser.add_argument(
+        "--arch",
+        action="store_true",
+        help="fetch details; color x86_64, i586 and aarch64 per subtask",
+    )
+    parser.add_argument(
+        "--source",
+        action="store_true",
+        help="show package names followed by source names and Git tags; add source objects to JSON",
+    )
+    parser.add_argument(
+        "--approvals",
+        action="store_true",
+        help="fetch details; show all approving and disapproving users for each subtask",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="show architectures, sources and approvals (--arch --source --approvals)",
+    )
+    parser.add_argument(
+        "-w",
+        "--watch",
+        type=uint,
+        nargs="?",
+        const=30,
+        default=None,
+        help="refresh every N seconds (default: 30; minimum: 3); press q or Ctrl+C to stop",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=positive,
+        default=15,
+        help="total request timeout in seconds (default: 15)",
+    )
+    output_arguments(
+        parser, "output a JSON array (details with --arch, --source or --all)"
+    )
+
+
+def configure_show_parser(parser):
+    parser.description = (
+        "Show one Girar task by ID, including DONE tasks. Architectures, sources "
+        "and approvals are enabled by default; the owner is read from the task."
+    )
+    parser.epilog = (
+        "Only tasks still available in the API can be shown. "
+        "Exit codes: 0 success, 1 API/detail or owner mismatch error, 2 invalid options."
+    )
+    if hasattr(parser, "color"):
+        parser.color = False
+    parser.add_argument("task_id", type=positive, metavar="ID", help="positive task ID")
+    parser.add_argument(
+        "-m",
+        "--maintainer",
+        type=maintainer_login,
+        default=argparse.SUPPRESS,
+        help="optional expected task owner",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=positive,
+        default=argparse.SUPPRESS,
+        help="total request timeout in seconds (default: 15)",
+    )
+    output_arguments(
+        parser, "output a one-element JSON array with all details", defaults=False
+    )
+
+
+def validate_args(args, parser):
+    if args.task_action == "show":
+        args.all = True
+        if (
+            args.branch != "ALL"
+            or args.state
+            or args.package
+            or args.limit
+            or args.days
+            or args.sort != "time"
+            or args.reverse
+        ):
+            parser.error(
+                "branch, state, package, date, limit and sort options apply to lists only"
+            )
+    elif args.maintainer is None:
+        parser.error("-m/--maintainer is required when listing tasks")
+    args.arch = args.arch or args.all
+    args.source = args.source or args.all
+    args.approvals = args.approvals or args.all
+    branch = re.sub(r"\s+", "", args.branch).lower()
+    if not re.fullmatch(r"[a-z0-9_.-]+(?:,[a-z0-9_.-]+)*", branch):
+        parser.error("--branch: expected a branch or comma-separated list")
+    if "all" in branch.split(","):
+        if branch != "all":
+            parser.error("ALL cannot be combined with other branches")
+        branch = "ALL"
+    args.branch = branch
+    states = re.sub(r"\s+", "", ",".join(args.state)).upper()
+    if any(not value.strip() for value in args.state):
+        parser.error("--state must not be empty")
+    args.state = states.split(",") if states else []
+    if any(state not in STATE_COLORS for state in args.state):
+        parser.error("--state: choose from " + ", ".join(STATE_COLORS))
+    if any(not pattern for pattern in args.package):
+        parser.error("--package must not be empty")
+
+    if args.watch is not None and args.watch < 3:
+        parser.error("--watch interval must be at least 3 seconds")
+    args.watch = args.watch or 0
+    if args.watch and args.json:
+        parser.error("--watch and --json cannot be combined")
+    args.since = ""
+    if args.days:
+        try:
+            args.since = (date.today() - timedelta(days=args.days - 1)).isoformat()
+        except (OverflowError, ValueError):
+            parser.error("--days value is too large")
+
+
+def request_json(args, url):
+    return request_worker("json-url", url, args, "Taskoteka request timed out")
+
+
+def fetch_task_data(rows, args, status=False):
+    pending = deque(
+        task for task in rows if not status or task["state"] in task_status.STATES
+    )
+    active, full, warnings = [], {}, []
+    label = "status" if status else "details"
+    try:
+        while active or pending:
+            check_quit(getattr(args, "watch_fd", None))
+            while pending and len(active) < 4:
+                task = pending.popleft()
+                worker = start_worker(
+                    "task-status" if status else "json-url",
+                    (task, task_status.API + str(task["id"]), task_status.TASKS)
+                    if status
+                    else API + "/tasks/" + str(task["id"]),
+                    args,
+                )
+                worker["task"] = task
+                active.append(worker)
+            for worker in active[:]:
+                task = worker["task"]
+                try:
+                    if worker["connection"].poll():
+                        value = receive_worker(worker)
+                        if status:
+                            value, warning = value
+                            if warning:
+                                warnings.append(
+                                    f"warning: #{task['id']}: {clean(warning)}."
+                                )
+                        detail = normalize(value)
+                        if (
+                            detail["id"] != task["id"]
+                            or detail["owner"].lower() != args.maintainer
+                            or detail["repo"] != task["repo"]
+                        ):
+                            raise CheckError("task details do not match summary")
+                        full[task["id"]] = dict(task, **detail)
+                    elif time.monotonic() - worker["started"] >= args.timeout:
+                        raise CheckError(
+                            "Task status request timed out"
+                            if status
+                            else "Taskoteka detail request timed out"
+                        )
+                    elif not worker["process"].is_alive():
+                        raise CheckError("API worker exited without a result")
+                    else:
+                        continue
+                except CheckError as exc:
+                    warnings.append(
+                        f"warning: #{task['id']}: task {label} unavailable; "
+                        f"showing summary data ({clean(exc)})."
+                    )
+                stop_workers([worker])
+                active.remove(worker)
+            if active:
+                time.sleep(0.05)
+    finally:
+        stop_workers(active)
+    return [full.get(task["id"], task) for task in rows], warnings
+
+
+def fetch_details(rows, args):
+    return fetch_task_data(rows, args)
+
+
+def fetch_statuses(rows, args):
+    return fetch_task_data(rows, args, status=True)
+
+
+def snapshot(args):
+    if args.task_action == "show":
+        task = normalize(request_json(args, API + "/tasks/" + str(args.task_id)))
+        if task["id"] != args.task_id:
+            raise CheckError("task details do not match requested ID")
+        owner = task["owner"].lower()
+        if args.maintainer is not None and args.maintainer != owner:
+            raise CheckError(
+                f"task #{args.task_id} is owned by {task['owner']}, not {args.maintainer}"
+            )
+        args.maintainer, args.branch = owner, task["repo"]
+        rows, warnings = fetch_statuses([task], args)
+        return rows, 1, warnings
+    query = urllib.parse.urlencode(
+        {"user": args.maintainer, "repo": args.branch, "state": "ALL"}
+    )
+    selected = select_tasks(request_json(args, API + "/tasks?" + query), args)
+    total = len(selected)
+    rows = selected[: args.limit] if args.limit else selected
+    warnings = []
+    if (args.arch or args.source or args.approvals) and rows:
+        rows, warnings = fetch_details(rows, args)
+        before = len(rows)
+        rows = select_tasks(rows, args)
+        if before != len(rows):
+            warnings.append(
+                "warning: task states changed during the request; rerun for a fresh list."
+            )
+    if rows:
+        rows, status_warnings = fetch_statuses(rows, args)
+        warnings.extend(status_warnings)
+    return rows, total, warnings
+
+
+def subtask_parts(subtask, arch, approvals):
+    colors = {
+        ArchStatus.SUCCESS: "32",
+        ArchStatus.FAILED: "1;31",
+        ArchStatus.EXCLUDED: "9;90",
+    }
+    parts = []
+    if arch:
+        for architecture in ARCHITECTURES:
+            if parts:
+                parts.append(("  ", None))
+            parts.append(
+                (
+                    architecture,
+                    colors.get(arch_status(subtask, architecture), "90"),
+                )
+            )
+    if approvals:
+        entries = []
+        for field, label, code in (
+            ("approved_by", "approved", "38;5;208"),
+            ("disapproved_by", "disapproved", "1;31"),
+        ):
+            names = (subtask or {}).get(field, [])
+            if names is None:
+                names = []
+            if not isinstance(names, list) or any(
+                not isinstance(name, str) for name in names
+            ):
+                continue
+            names = sorted(
+                {task_clean(name) for name in names if task_clean(name)},
+                key=str.casefold,
+            )
+            if names:
+                entries.append((label + ": " + ", ".join(names), code))
+        for entry in entries:
+            if parts:
+                parts.append(("  |  ", "90"))
+            parts.append(entry)
+    return parts
+
+
+def render_rows(rows, package_lists, args, color, width):
+    lines = []
+    tree = ("├─", "└─", "│")
+    try:
+        "".join(tree).encode(sys.stdout.encoding or "utf-8")
+    except UnicodeEncodeError:
+        tree = ("|-", "`-", "|")
+    joint, end, vertical = tree
+    digits = len(str(len(rows)))
+    all_rows = [
+        row
+        for entries in package_lists
+        for row in (entries or [("", "(no packages)", None)])
+    ]
+    number_width = max([1] + [len(number) + 1 for number, _, _ in all_rows])
+    prefix_width = number_width + 7
+    details_width = max(
+        [0]
+        + [
+            sum(
+                len(text)
+                for text, _ in subtask_parts(subtask, args.arch, args.approvals)
+            )
+            for _, _, subtask in all_rows
+        ]
+    )
+    package_width = min(
+        max([13] + [len(name) for _, name, _ in all_rows]),
+        max(0, width - prefix_width - 3 - details_width),
+    )
+    for index, (task, entries) in enumerate(zip(rows, package_lists), 1):
+        if lines:
+            lines.append("")
+        header = [
+            (f"[{index:>{digits}}/{len(rows)}]  ", "90"),
+            (str(task["id"]), "1"),
+            ("  [" + task["state"] + "]", STATE_COLORS.get(task["state"], "0")),
+            ("  " + task_clean(task["repo"]), "36"),
+        ]
+        if task.get("test_only") is True:
+            header.append(("  TEST", "90"))
+        failed = task["state"] == "FAILED" and bool(task.get("failed_check"))
+        stage = (
+            (task.get("failed_check") if failed else task.get("stage"))
+            if task["state"] in task_status.STATES
+            else None
+        )
+        if stage:
+            header.extend(
+                [
+                    ("  |  ", "90"),
+                    (
+                        task_clean(stage),
+                        "1;31" if failed else STATE_COLORS.get(task["state"], "36"),
+                    ),
+                ]
+            )
+        lines.append(wrapped_parts(header, width, color=color))
+        entries = entries or [("", "(no packages)", None)]
+        inline = (args.arch or args.approvals) and (
+            all(len(name) <= package_width for _, name, _ in entries)
+            or package_width >= 20
+        )
+        for subindex, (number, name, subtask) in enumerate(entries):
+            details = subtask_parts(subtask, args.arch, args.approvals)
+            last = subindex == len(entries) - 1
+            connector = "  " + (end if last else joint) + " "
+            label = ("#" + number if number else "-").rjust(number_width)
+            parts = [(connector, "90"), (label, "36"), ("  ", None)]
+            gutter = "   " if last else "  " + vertical
+            continuation = gutter.ljust(prefix_width)[: min(prefix_width, width // 2)]
+            source = (subtask or {}).get("source") or {}
+            url = source.get("url")
+            if source:
+                name_parts = [
+                    (package_name(subtask), None),
+                    (" [", "90"),
+                    (source["label"], "36", url),
+                    ("]", "90"),
+                ]
+            else:
+                name_parts = [(name, None)]
+            if inline and details:
+                plain_cells = wrapped_parts([(name, None)], package_width).splitlines()
+                cells = wrapped_parts(
+                    name_parts, package_width, color=color
+                ).splitlines()
+                for line_index, (plain, cell) in enumerate(zip(plain_cells, cells)):
+                    prefix = (
+                        "".join(
+                            paint(text, code, color) if code else text
+                            for text, code in parts
+                        )
+                        if line_index == 0
+                        else paint(gutter.ljust(prefix_width), "90", color)
+                    )
+                    line = prefix + cell
+                    if line_index == 0:
+                        line += " " * (package_width - len(plain))
+                        line += paint(" " + vertical + " ", "90", color)
+                        line += wrapped_parts(details, width, color=color)
+                    lines.append(line)
+            else:
+                lines.append(
+                    wrapped_parts(
+                        parts + name_parts,
+                        width,
+                        continuation=continuation,
+                        color=color,
+                    )
+                )
+                if details:
+                    lines.append(
+                        wrapped_parts(details, width, continuation, color=color)
+                    )
+            if not last and details and not inline:
+                lines.append(paint(gutter[:width].rstrip(), "90", color))
+    return lines
+
+
+def render(rows, args, total, width=None):
+    width = max(1, width if width is not None else shutil.get_terminal_size().columns)
+    color = color_enabled(args.color, sys.stdout)
+    branch = "all branches" if args.branch == "ALL" else args.branch
+    owner, branch = task_clean(args.maintainer), task_clean(branch)
+    listing = f"Listing {len(rows)} tasks: {owner} / {branch}" + (
+        f" ({total} matched)" if total > len(rows) else ""
+    )
+    if args.task_action == "show":
+        listing = f"Task {args.task_id}: {owner} / {branch}"
+    lines = [wrapped_parts([(listing, None)], width)]
+    if args.watch:
+        controls = (
+            "q or Ctrl+C to stop"
+            if getattr(args, "watch_fd", None) is not None
+            else "Ctrl+C to stop"
+        )
+        lines.append(
+            wrapped_parts(
+                [
+                    (
+                        f"Updated: {datetime.now():%Y-%m-%d %H:%M:%S}  |  Every {args.watch}s  |  {controls}",
+                        None,
+                    )
+                ],
+                width,
+            )
+        )
+    lines.append("")
+    if not rows:
+        lines.append(
+            wrapped_parts([("No tasks match the selected filters.", None)], width)
+        )
+    else:
+        lines.extend(
+            render_rows(
+                rows,
+                [package_rows(t, args.source) for t in rows],
+                args,
+                color,
+                width,
+            )
+        )
+    counts = Counter(t["state"] for t in rows)
+    summary = [("Summary: ", None)]
+    for state in sorted(counts):
+        if len(summary) > 1:
+            summary.append(("  |  ", None))
+        summary.append((f"{state}={counts[state]}", STATE_COLORS.get(state, "0")))
+    if not counts:
+        summary.append(("0 tasks", None))
+    lines.extend(["", wrapped_parts(summary, width, color=color)])
+    return "\n".join(lines)
+
+
+def display_tasks(args):
+    while True:
+        try:
+            rows, total, warnings = snapshot(args)
+        except (CheckError, OSError) as exc:
+            print(
+                "error: could not retrieve or process tasks: " + clean(exc),
+                file=sys.stderr,
+                flush=True,
+            )
+            if not args.watch:
+                return 1
+            print(
+                f"Retrying in {args.watch}s; the previous successful snapshot is unchanged.",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            if args.json and args.source:
+                rows = [with_sources(task) for task in rows]
+            if (
+                args.watch
+                and sys.stdout.isatty()
+                and color_enabled(args.color, sys.stdout)
+            ):
+                print("\033[2J\033[H", end="")
+            print(
+                json.dumps(rows, ensure_ascii=True, indent=2)
+                if args.json
+                else render(rows, args, total),
+                flush=True,
+            )
+            for warning in warnings:
+                print(warning, file=sys.stderr, flush=True)
+            if not args.watch:
+                return 1 if warnings else 0
+        wait(args.watch, args.watch_fd)
+
+
+def main(args):
+    with watch_input(args.watch) as descriptor:
+        args.watch_fd = descriptor
+        try:
+            return display_tasks(args)
+        except WatchQuit:
+            return 0
+        finally:
+            args.watch_fd = None

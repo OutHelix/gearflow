@@ -1,0 +1,15 @@
+id=123 repo=sisyphus owner=test state=NEW locked=no test_only=yes
+ 100:dir=packages/demo.git
+ 100:tag_name=2.0-alt1
+ 100:tag_id=abc
+ 200:srpm=/incoming/lib-extra-1.0-alt1.src.rpm
+ 300:package=already-rebuilt
+ 300:rebuild_from=sisyphus
+ 400:package=copied
+ 400:copy_repo=p11
+ 500:package=removed
+ 500:delete=yes
+ 600:userid=test
+ 700:dir=packages/repository-alias
+ 700:pkgname=actual-source
+ 700:type=srpm

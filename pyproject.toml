@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gearflow"
+dynamic = ["version"]
+description = "Release checks, security advisories, gear updates and Girar tasks for ALT Linux"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Evgeniy Serov", email = "scala@altlinux.org"}]
+dependencies = []
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Unix Shell",
+    "Topic :: System :: Software Distribution",
+]
+
+[project.urls]
+Repository = "https://github.com/OutHelix/gearflow"
+Issues = "https://github.com/OutHelix/gearflow/issues"
+
+[project.scripts]
+gearflow = "gearflow.cli:main"
+gear-update-upstream = "gearflow.cli:legacy_update_main"
+repokeep = "gearflow.monitor.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "gearflow.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["gearflow*", "repokeep*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+gearflow = ["shell/*.sh"]
