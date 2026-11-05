@@ -12,7 +12,7 @@ GEARFLOW_PYTHON="${GEARFLOW_PYTHON:-python3}"
 # Also support source checkouts and direct sourcing in offline tests.
 export PYTHONPATH="${GEARFLOW_SHELL_DIR}/../..${PYTHONPATH:+:$PYTHONPATH}"
 
-for module in common git spec upstream layout prepare girar build state workflow cli; do
+for module in common git spec upstream layout prepare girar build state workflow publish cli; do
     # shellcheck source=/dev/null
     source "$GEARFLOW_SHELL_DIR/$module.sh"
 done

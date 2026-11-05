@@ -4,6 +4,7 @@ import argparse
 import sys
 from typing import Optional, Sequence
 
+from .build import stage_changes
 from .girar import parse_task
 from .rdb import query_rebuilds
 
@@ -11,6 +12,7 @@ from .rdb import query_rebuilds
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("stage")
     task = commands.add_parser("parse-task")
     task.add_argument("task_id")
     rebuilds = commands.add_parser("rebuilds")
@@ -19,7 +21,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rebuilds.add_argument("packages", nargs="+")
     args = parser.parse_args(argv)
     try:
-        if args.command == "parse-task":
+        if args.command == "stage":
+            stage_changes()
+        elif args.command == "parse-task":
             snapshot = parse_task(sys.stdin.read(), args.task_id)
             for notice in snapshot.notices:
                 print(notice, file=sys.stderr)
@@ -31,11 +35,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for name in names:
                 print(name)
     except (OSError, ValueError) as error:
-        prefix = (
-            "Cannot scan Girar task"
-            if args.command == "parse-task"
-            else "RDB dependency lookup failed"
-        )
+        prefix = {
+            "stage": "Cannot stage package",
+            "parse-task": "Cannot scan Girar task",
+            "rebuilds": "RDB dependency lookup failed",
+        }[args.command]
         print(f"{prefix}: {error}", file=sys.stderr)
         return 1
     return 0

@@ -158,13 +158,18 @@ EOF
 }
 
 main() {
+    local PREPARE_ONLY=0
+    if [[ "${1:-}" == --prepare-only ]]; then
+        PREPARE_ONLY=1
+        shift
+    fi
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
         show_help
         return 0
     fi
 
     case "${1:-}" in
-        --prepare-package|--check-layout|--migrate-layout|--resume|--resume-after-merge|--resume-status|--progress|--clear-resume|--continue|--continue-update|--continue-fix|--scan-task) ;;
+        --publish-gitery-only|--prepare-package|--check-layout|--migrate-layout|--resume|--resume-after-merge|--resume-status|--progress|--clear-resume|--continue|--continue-update|--continue-fix|--scan-task) ;;
         -*) printf 'ERROR: Unknown option: %s. See %s --help.\n' "$1" "${GEARFLOW_PROGRAM:-gearflow}" >&2; return 2 ;;
     esac
 
@@ -172,6 +177,12 @@ main() {
 
     SCRIPT_INVOKED_AS="${GEARFLOW_COMMAND:-gearflow}"
     export SCRIPT_INVOKED_AS
+
+    if [[ "${1:-}" == --publish-gitery-only ]]; then
+        (( $# <= 2 )) || die "Usage: gearflow publish [DIR] --gitery-only"
+        publish_gitery_only "${2:-.}"
+        return
+    fi
 
     if [[ "${1:-}" == "--scan-task" ]]; then
         shift
@@ -340,6 +351,11 @@ main() {
     spec_name="$(read_spec_field "$spec" 'Name' || true)"
     spec_name="$(trim "$spec_name")"
     [[ -n "$spec_name" && "$spec_name" != *'%'* ]] || spec_name="$package"
+    # A checkout directory may contain spaces even though a package name cannot.
+    if [[ ! "$package" =~ ^[A-Za-z0-9][A-Za-z0-9+_.-]*$ ]]; then
+        package="$spec_name"
+        [[ "$package" =~ ^[A-Za-z0-9][A-Za-z0-9+_.-]*$ ]] || die "Cannot determine the package name"
+    fi
     current_version="$(read_spec_field "$spec" 'Version' || true)"
     current_version="$(trim "$current_version")"
 

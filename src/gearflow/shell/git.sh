@@ -78,6 +78,8 @@ fetch_upstream_tag() {
 
 working_tree_clean_except_backups() {
     local record status path old_path
+    local -a build_logs=()
+    mapfile -d '' -t build_logs < <(git config --null --get-all gearflow.build-log || true)
 
     while IFS= read -r -d '' record; do
         status="${record:0:2}"
@@ -92,6 +94,11 @@ working_tree_clean_except_backups() {
 
         if [[ "$path" == *~ && ( -z "$old_path" || "$old_path" == *~ ) ]]; then
             continue
+        fi
+        if [[ "$status" == '??' ]]; then
+            if array_contains "$path" "${build_logs[@]}" || array_contains "$(pwd -P)/$path" "${build_logs[@]}"; then
+                continue
+            fi
         fi
         return 1
     done < <(git status --porcelain=v1 -z --untracked-files=all)

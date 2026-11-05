@@ -50,13 +50,14 @@ detect_current_release_repo() {
 
 check_common_commands() {
     need_cmd git
+    need_cmd gear-store-tags
+    need_cmd add_changelog
+    (( ! ${PREPARE_ONLY:-0} )) || return 0
     need_cmd ssh
     need_cmd gear
     need_cmd hsh
-    need_cmd gear-store-tags
     need_cmd gear-commit
     need_cmd gear-create-tag
-    need_cmd add_changelog
 }
 
 check_continue_commands() {
@@ -76,7 +77,7 @@ run_test_build() {
     # Stage everything first.  Then remove editor backup files from the
     # index by their exact paths.  This also fixes backup files that may have
     # been staged by an older version of this script.
-    git add -A
+    "$GEARFLOW_PYTHON" -m gearflow.services stage || return
 
     local backup
     local -a ignored_backups=()

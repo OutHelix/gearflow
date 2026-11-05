@@ -94,6 +94,11 @@ def parser() -> argparse.ArgumentParser:
     )
     _add_version(update)
     update.add_argument("target", nargs="?", metavar="DIR|URL")
+    update.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="stop after merge, rules, spec/changelog and stored tags; do not build or publish",
+    )
     modes = update.add_mutually_exclusive_group()
     for option in (
         "--resume",
@@ -135,6 +140,30 @@ def parser() -> argparse.ArgumentParser:
         help="show advanced workflow modes and environment settings",
     )
     _add_version(workflow)
+
+    build = commands.add_parser(
+        "build", help="build a prepared tree in hasher and write both streams to a log"
+    )
+    _add_version(build)
+    build.add_argument("directory", nargs="?", default=".", metavar="DIR")
+    build.add_argument(
+        "--log",
+        required=True,
+        metavar="FILE",
+        help="overwrite FILE with build stdout/stderr; no terminal output",
+    )
+
+    publish = commands.add_parser(
+        "publish", help="commit, tag and push a reviewed package to Gitery"
+    )
+    _add_version(publish)
+    publish.add_argument("directory", nargs="?", default=".", metavar="DIR")
+    publish.add_argument(
+        "--gitery-only",
+        required=True,
+        action="store_true",
+        help="publish to Gitery without building or submitting to Girar",
+    )
     return root
 
 
@@ -159,19 +188,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     if options.command == "workflow-help":
         return launch_update(["--help"])
+    if options.command == "build":
+        from .build import build_package
+
+        return build_package(options.directory, options.log)
+    if options.command == "publish":
+        return launch_update(["--publish-gitery-only", options.directory])
     if options.command == "update":
         target = options.target
+        prefix = ["--prepare-only"] if options.prepare_only else []
         if options.workflow_mode:
+            if options.prepare_only and options.workflow_mode.startswith("--continue"):
+                root.error("--prepare-only cannot be combined with --continue modes")
             if target and _is_repository_url(target):
                 root.error("resume/continue modes require a local repository directory")
-            return launch_update([options.workflow_mode, *([target] if target else [])])
+            return launch_update(
+                [*prefix, options.workflow_mode, *([target] if target else [])]
+            )
         if target is None:
-            return launch_update([])
+            return launch_update(prefix)
         path = Path(target).expanduser()
         if path.is_dir():
-            return launch_update([], repository=os.fspath(path))
+            return launch_update(prefix, repository=os.fspath(path))
         if _is_repository_url(target):
-            return launch_update([target])
+            return launch_update([*prefix, target])
         root.error(f"repository directory not found: {target}")
     if options.command == "rebuild":
         workflow_args = ["--scan-task"]

@@ -2,7 +2,19 @@
 # SPDX-License-Identifier: MIT
 
 run_saved_update() {
-    local rules=.gear/rules spec current_head parent answer tag_commit
+    local rules=.gear/rules spec current_head parent answer tag_commit gitery_only=0 mode rc
+    if mode="$(git config --local --bool --get gearflow.gitery-only)"; then
+        [[ "$mode" != true ]] || gitery_only=1
+    else
+        rc=$?
+        (( rc == 1 )) || die "Invalid Gitery-only publication setting"
+    fi
+    if (( ${PREPARE_ONLY:-0} )); then
+        case "$RESUME_STAGE" in
+            merge|rules|spec|tags|build) ;;
+            *) die "The update has already passed preparation; --prepare-only will not run later stages" ;;
+        esac
+    fi
     TARGET_BRANCH="$RESUME_BRANCH"
     RELEASE="$RESUME_RELEASE"
     [[ "$(git branch --show-current)" == "$TARGET_BRANCH" ]] \
@@ -12,9 +24,14 @@ run_saved_update() {
     if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
         die "Finish the current merge with 'git commit --no-edit', then run --resume."
     fi
-    tag_commit="$(git rev-parse --verify "refs/tags/$RESUME_UPSTREAM_TAG^{commit}")" \
-        || die "Saved upstream tag is missing: $RESUME_UPSTREAM_TAG"
-    [[ "$tag_commit" == "$RESUME_UPSTREAM_COMMIT" ]] || die "Saved upstream tag has moved"
+    if [[ -n "$RESUME_UPSTREAM_TAG" ]]; then
+        tag_commit="$(git rev-parse --verify "refs/tags/$RESUME_UPSTREAM_TAG^{commit}")" \
+            || die "Saved upstream tag is missing: $RESUME_UPSTREAM_TAG"
+        [[ "$tag_commit" == "$RESUME_UPSTREAM_COMMIT" ]] || die "Saved upstream tag has moved"
+    else
+        (( gitery_only )) || die "Saved upstream tag is missing"
+        case "$RESUME_STAGE" in commit|tag|push-branch|push-tag|girar|gitery-done) ;; *) die "Invalid standalone publication stage" ;; esac
+    fi
 
     log "Resuming update at stage: $RESUME_STAGE"
     info "Package: $RESUME_PACKAGE $RESUME_VERSION-$RESUME_RELEASE"
@@ -102,6 +119,11 @@ run_saved_update() {
                 ;;
             build)
                 check_resume_metadata
+                if (( ${PREPARE_ONLY:-0} )); then
+                    info "Preparation complete. Changes are uncommitted; progress is saved before build."
+                    info "Review patches and components, then run: gearflow build . --log FILE"
+                    return 0
+                fi
                 need_cmd gear
                 need_cmd hsh
                 spec="$(find_spec "$rules" "$RESUME_PACKAGE")"
@@ -162,6 +184,10 @@ run_saved_update() {
                 fi
                 ;;
             girar)
+                if (( gitery_only )); then
+                    advance_resume_stage gitery-done
+                    continue
+                fi
                 need_cmd ssh
                 # SSH may submit a task and lose its response. Save this marker
                 # BEFORE submission so a retry never silently creates a duplicate.
@@ -183,7 +209,7 @@ run_saved_update() {
                     esac
                 done
                 ;;
-            done)
+            done|gitery-done)
                 printf '\nDone.\nPackage: %s\nVersion: %s\nTag:     %s\n' \
                     "$RESUME_PACKAGE" "$RESUME_VERSION" "$RESUME_GEAR_TAG"
                 git config --local --replace-all gear-update-upstream.last-update \

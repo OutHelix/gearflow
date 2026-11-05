@@ -17,6 +17,13 @@ remove_resume_state() {
         git config --local --unset-all gear-update-upstream.resume
     fi
     rm -f -- "$(legacy_resume_state_path)"
+    clear_gitery_only_intent
+}
+
+clear_gitery_only_intent() {
+    if git config --local --get gearflow.gitery-only >/dev/null 2>&1; then
+        git config --local --unset-all gearflow.gitery-only
+    fi
 }
 
 resume_fields() {
@@ -76,7 +83,7 @@ load_resume_state() {
         done
     fi
     case "$RESUME_STAGE" in
-        merge|rules|spec|tags|build|commit|tag|push-branch|push-tag|girar|girar-pending|done) ;;
+        merge|rules|spec|tags|build|commit|tag|push-branch|push-tag|girar|girar-pending|gitery-done|done) ;;
         *) die "Unknown saved stage: $RESUME_STAGE" ;;
     esac
     case "$TAG_SCHEME_CHANGE_MODE" in none|auto|edit) ;; *) die "Invalid saved tag mode" ;; esac
@@ -125,6 +132,10 @@ update_progress_index() {
         printf '%d\n' "${#UPDATE_PROGRESS_STAGES[@]}"
         return
     fi
+    if [[ "$stage" == gitery-done ]]; then
+        printf '9\n'
+        return
+    fi
     [[ "$stage" != girar-pending ]] || stage=girar
     for (( i = 0; i < ${#UPDATE_PROGRESS_STAGES[@]}; i++ )); do
         if [[ "${UPDATE_PROGRESS_STAGES[i]}" == "$stage" ]]; then
@@ -150,6 +161,7 @@ show_update_progress() {
     fi
     index="$(update_progress_index)"
     total="${#UPDATE_PROGRESS_STAGES[@]}"
+    [[ "$RESUME_STAGE" != gitery-done ]] || total=9
     (( ! last_update )) || printf 'Last update:\n'
     printf 'Repository: %s\nPackage:    %s\nVersion:    %s-%s\nUpstream:   %s\n' \
         "$(pwd)" "$RESUME_PACKAGE" "$RESUME_VERSION" "$RESUME_RELEASE" "$RESUME_UPSTREAM_TAG"
@@ -168,7 +180,9 @@ show_update_progress() {
         fi
         printf '  %2d. [%-7s] %s\n' "$((i + 1))" "$status" "${UPDATE_PROGRESS_LABELS[i]}"
     done
-    if [[ "$RESUME_STAGE" == girar-pending ]]; then
+    if [[ "$RESUME_STAGE" == gitery-done ]]; then
+        printf '\nPublished to Gitery only. Girar submission was not requested.\n'
+    elif [[ "$RESUME_STAGE" == girar-pending ]]; then
         printf '\nGirar submission result is unknown. Check Girar before retrying.\n'
     elif (( index < total )); then
         printf '\nContinue with: %s --resume %q\n' "$SCRIPT_INVOKED_AS" "$(pwd)"
@@ -196,6 +210,7 @@ clear_resume_state() {
 }
 
 initialize_resume_state() {
+    clear_gitery_only_intent
     RESUME_STAGE="$1"
     RESUME_PACKAGE="$2"
     RESUME_VERSION="$3"
@@ -241,6 +256,8 @@ check_resume_metadata() {
     if (( ! LAYOUT_MIGRATION_SKIPPED )); then
         validate_altlinux_layout "$rules" "$spec" || return 1
     fi
+    # A standalone publication can use gear rules without an upstream tag.
+    [[ -n "$RESUME_UPSTREAM_TAG" ]] || return 0
     resolve_gear_source_tag "$rules" "$(resume_spec_name "$spec")" "$RESUME_VERSION"
     [[ "$RESOLVED_GEAR_SOURCE_TAG" == "$RESUME_UPSTREAM_TAG" ]] \
         || die "Gear rules do not match the saved upstream tag. Update rules before continuing this stage."

@@ -22,6 +22,9 @@ class UnifiedCliTests(unittest.TestCase):
             ["rebuild", "123", "--unknown"],
             ["update", "--resume", "https://example.invalid/demo.git"],
             ["update", "--resume", "--continue"],
+            ["update", "--prepare-only", "--continue", "."],
+            ["build", "."],
+            ["publish", "."],
         ]
         for args in cases:
             with self.subTest(args=args), patch("gearflow.cli.launch_update") as run:
@@ -49,6 +52,18 @@ class UnifiedCliTests(unittest.TestCase):
         with patch("gearflow.cli.launch_update", return_value=0) as run:
             cli.main(["workflow-help"])
             run.assert_called_once_with(["--help"])
+
+    def test_prepare_only_and_publication_dispatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("gearflow.cli.launch_update", return_value=0) as run:
+                cli.main(["update", "--prepare-only", directory])
+                run.assert_called_once_with(["--prepare-only"], repository=directory)
+        with patch("gearflow.cli.launch_update", return_value=0) as run:
+            cli.main(["update", "--prepare-only", "--resume", "."])
+            run.assert_called_once_with(["--prepare-only", "--resume", "."])
+        with patch("gearflow.cli.launch_update", return_value=0) as run:
+            cli.main(["publish", ".", "--gitery-only"])
+            run.assert_called_once_with(["--publish-gitery-only", "."])
 
     def test_check_and_task_use_python_monitor_without_bash(self):
         for args in (["check", "-m", "scala"], ["task", "show", "123"]):

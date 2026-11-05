@@ -66,6 +66,8 @@ class CliTests(unittest.TestCase):
             ("update", "DIR|URL"),
             ("resume", "DIR"),
             ("rebuild", "TASK"),
+            ("build", "--log"),
+            ("publish", "--gitery-only"),
         ):
             with self.subTest(command=command):
                 result = self.run_cli(command, "--help", env={"PATH": ""})

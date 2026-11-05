@@ -33,6 +33,8 @@ jobs:
               gearflow check --help
               gearflow task show --help
               gearflow update --help
+              gearflow build --help
+              gearflow publish --help
               repokeep update --help
               repokeep task show --help
               python -m gearflow --help

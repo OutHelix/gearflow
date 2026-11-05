@@ -41,6 +41,12 @@ def audit(event, args):
                 "diff",
                 "show",
                 "rev-parse",
+                "ls-files",
+                "reset",
+                "rm",
+                "tag",
+                "branch",
+                "switch",
             }
             local_fixture = (
                 local_repo

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.2 — 2026-11-05
+
+- Add `build DIR --log FILE`: quiet hasher builds of prepared trees with exact
+  build exit status, including initial builds and retries.
+- Add `update --prepare-only`: stop after preparing metadata and stored tags.
+- Add `publish DIR --gitery-only`: commit, sign and push independently of builds
+  and Girar, retaining progress and publication intent across interrupted pushes.
+- Exclude registered build logs and editor backups from staging and publication.
+- Forward build interruption signals to the builder process group.
+
 ## 0.0.1 — 2026-11-05
 
 First gearflow release, combining repokeep monitoring and package update workflows.
