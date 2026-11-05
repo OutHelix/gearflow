@@ -33,12 +33,23 @@ def audit(event, args):
             allowed = environment.get("REPOKEEP_TEST_GIT")
             local_repo = environment.get("GEARFLOW_TEST_REPOSITORY")
             command = args[1]
-            local_commands = {"init", "config", "add", "commit", "diff", "show", "rev-parse"}
+            local_commands = {
+                "init",
+                "config",
+                "add",
+                "commit",
+                "diff",
+                "show",
+                "rev-parse",
+            }
             local_fixture = (
-                local_repo and Path(local_repo).name.startswith("gearflow test ")
+                local_repo
+                and Path(local_repo).name.startswith("gearflow test ")
                 and Path(local_repo).parent == Path(environment.get("TMPDIR", "/tmp"))
-                and args[2] is not None and Path(args[2]).resolve() == Path(local_repo).resolve()
-                and isinstance(command, (list, tuple)) and len(command) > 1
+                and args[2] is not None
+                and Path(args[2]).resolve() == Path(local_repo).resolve()
+                and isinstance(command, (list, tuple))
+                and len(command) > 1
                 and command[1] in local_commands
             )
             if (not allowed or resolved != allowed) and not local_fixture:
@@ -53,7 +64,11 @@ def install():
         return
     INSTALLED = True
     root = Path(__file__).resolve().parents[2]
-    paths = [str(root / "tests" / "monitor" / "bootstrap"), str(root / "src"), str(root)]
+    paths = [
+        str(root / "tests" / "monitor" / "bootstrap"),
+        str(root / "src"),
+        str(root),
+    ]
     paths.extend(os.environ.get("PYTHONPATH", "").split(os.pathsep))
     os.environ["PYTHONPATH"] = os.pathsep.join(
         dict.fromkeys(path for path in paths if path)

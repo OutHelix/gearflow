@@ -2,9 +2,9 @@
 
 import json
 import re
-from typing import Any, Sequence
 import urllib.parse
 import urllib.request
+from typing import Any, Sequence
 
 from .girar import package_name
 
@@ -21,11 +21,15 @@ def dependency_url(
     if not packages:
         raise ValueError("at least one source package is required")
     params = [
-        ("branch", branch), ("depth", depth), ("dptype", dptype),
+        ("branch", branch),
+        ("depth", depth),
+        ("dptype", dptype),
         ("use_last_tasks", "true"),
     ]
     params.extend(("packages", package_name(package)) for package in packages)
-    return base.rstrip("/") + "/package/what_depends_src?" + urllib.parse.urlencode(params)
+    return (
+        base.rstrip("/") + "/package/what_depends_src?" + urllib.parse.urlencode(params)
+    )
 
 
 def rebuild_candidates(data: Any, packages: Sequence[str]) -> list[str]:
@@ -48,7 +52,9 @@ def rebuild_candidates(data: Any, packages: Sequence[str]) -> list[str]:
             names.append(name)
     missing = set(packages) - found_roots
     if missing:
-        raise ValueError("source packages absent from RDB: " + " ".join(sorted(missing)))
+        raise ValueError(
+            "source packages absent from RDB: " + " ".join(sorted(missing))
+        )
     return [name for name in names if name not in packages]
 
 
@@ -56,9 +62,13 @@ def query_rebuilds(
     base: str, depth: str, dptype: str, branch: str, packages: Sequence[str]
 ) -> list[str]:
     url = dependency_url(base, depth, dptype, branch, packages)
-    request = urllib.request.Request(url, headers={
-        "Accept": "application/json", "User-Agent": "gearflow",
-    })
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "gearflow",
+        },
+    )
     with urllib.request.urlopen(request, timeout=120) as response:
         data = json.load(response)
     # Do not return a partial plan if any dependency record is invalid.

@@ -18,18 +18,31 @@ class RdbTests(unittest.TestCase):
         return {"length": len(rows), "dependencies": rows}
 
     def test_deduplicates_in_build_order_and_excludes_roots(self):
-        self.assertEqual(rebuild_candidates(self.data(), ["demo"]), ["lib-first", "lib-second"])
+        self.assertEqual(
+            rebuild_candidates(self.data(), ["demo"]), ["lib-first", "lib-second"]
+        )
 
     def test_absent_roots_are_an_error_including_empty_responses(self):
         for data in (self.data(), {"length": 0, "dependencies": []}):
-            with self.subTest(data=data), self.assertRaisesRegex(ValueError, "absent from RDB"):
+            with (
+                self.subTest(data=data),
+                self.assertRaisesRegex(ValueError, "absent from RDB"),
+            ):
                 rebuild_candidates(data, ["missing"])
 
     def test_incomplete_or_malformed_plans_are_rejected(self):
-        cases = [None, {}, {"length": 1, "dependencies": []},
-                 {"length": True, "dependencies": [{}]}]
-        for row in (None, {"name": "bad name", "depth": 1},
-                    {"name": "ok", "depth": True}, {"name": "ok", "depth": -1}):
+        cases = [
+            None,
+            {},
+            {"length": 1, "dependencies": []},
+            {"length": True, "dependencies": [{}]},
+        ]
+        for row in (
+            None,
+            {"name": "bad name", "depth": 1},
+            {"name": "ok", "depth": True},
+            {"name": "ok", "depth": -1},
+        ):
             data = self.data()
             data["dependencies"][-1] = row
             cases.append(data)
@@ -38,12 +51,20 @@ class RdbTests(unittest.TestCase):
                 rebuild_candidates(data, ["demo"])
 
     def test_request_carries_all_roots_and_parameters(self):
-        url = dependency_url("https://example.invalid/api/", "2", "both", "p11", ["a", "b+"])
+        url = dependency_url(
+            "https://example.invalid/api/", "2", "both", "p11", ["a", "b+"]
+        )
         self.assertEqual(urlsplit(url).path, "/api/package/what_depends_src")
-        self.assertEqual(parse_qs(urlsplit(url).query), {
-            "branch": ["p11"], "depth": ["2"], "dptype": ["both"],
-            "use_last_tasks": ["true"], "packages": ["a", "b+"],
-        })
+        self.assertEqual(
+            parse_qs(urlsplit(url).query),
+            {
+                "branch": ["p11"],
+                "depth": ["2"],
+                "dptype": ["both"],
+                "use_last_tasks": ["true"],
+                "packages": ["a", "b+"],
+            },
+        )
 
     def test_invalid_settings_fail_before_network_access(self):
         for base, depth, dptype in (
@@ -58,11 +79,14 @@ class RdbTests(unittest.TestCase):
                     request.assert_not_called()
 
     def test_http_result_is_validated(self):
-        with patch("gearflow.rdb.urllib.request.urlopen", return_value=io.BytesIO(
-            json.dumps(self.data()).encode()
-        )) as request:
+        with patch(
+            "gearflow.rdb.urllib.request.urlopen",
+            return_value=io.BytesIO(json.dumps(self.data()).encode()),
+        ) as request:
             self.assertEqual(
-                query_rebuilds("https://example.invalid", "1", "both", "sisyphus", ["demo"]),
+                query_rebuilds(
+                    "https://example.invalid", "1", "both", "sisyphus", ["demo"]
+                ),
                 ["lib-first", "lib-second"],
             )
             self.assertEqual(request.call_args.kwargs["timeout"], 120)

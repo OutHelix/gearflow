@@ -8,9 +8,7 @@ from . import __version__, tasks, updates
 
 
 def parser(prog="repokeep", check_command="update"):
-    root = argparse.ArgumentParser(
-        prog=prog, description="ALT Linux maintainer tools."
-    )
+    root = argparse.ArgumentParser(prog=prog, description="ALT Linux maintainer tools.")
     if hasattr(root, "color"):
         root.color = False
     root.add_argument("--version", action="version", version="%(prog)s " + __version__)
@@ -26,7 +24,11 @@ def parser(prog="repokeep", check_command="update"):
     actions = task_parser.add_subparsers(dest="task_action")
     show_parser = actions.add_parser("show", help="show one task with all details")
     tasks.configure_show_parser(show_parser)
-    return root, {check_command: update_parser, "task": task_parser, "show": show_parser}
+    return root, {
+        check_command: update_parser,
+        "task": task_parser,
+        "show": show_parser,
+    }
 
 
 def run(argv=None, *, prog="repokeep", check_command="update"):

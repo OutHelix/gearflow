@@ -32,7 +32,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(name)
     except (OSError, ValueError) as error:
         prefix = (
-            "Cannot scan Girar task" if args.command == "parse-task"
+            "Cannot scan Girar task"
+            if args.command == "parse-task"
             else "RDB dependency lookup failed"
         )
         print(f"{prefix}: {error}", file=sys.stderr)

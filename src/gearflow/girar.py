@@ -1,9 +1,9 @@
 """Parse Girar's live task text without executing its contents."""
 
-from dataclasses import dataclass
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 
 
 def package_name(value: str) -> str:
@@ -40,7 +40,8 @@ def parse_task(text: str, task_id: str) -> TaskSnapshot:
         raise ValueError("task is locked; wait until it stops building")
     if header.get("state") not in ("NEW", "SWEPT", "TESTED", "EPERM", "FAILED"):
         raise ValueError(
-            "task state does not allow adding rebuilds: " + header.get("state", "unknown")
+            "task state does not allow adding rebuilds: "
+            + header.get("state", "unknown")
         )
     branch = header.get("repo", "")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", branch):
@@ -58,12 +59,27 @@ def parse_task(text: str, task_id: str) -> TaskSnapshot:
         # Deleted subtasks may retain userid and old build metadata.
         if not any(subtask.get(key) for key in ("dir", "srpm", "package")):
             continue
-        actions.append((number, {
-            key: subtask[key] for key in (
-                "dir", "srpm", "package", "tag_name", "tag_id", "rebuild_from",
-                "copy_repo", "delete", "type", "pkgname",
-            ) if key in subtask
-        }))
+        actions.append(
+            (
+                number,
+                {
+                    key: subtask[key]
+                    for key in (
+                        "dir",
+                        "srpm",
+                        "package",
+                        "tag_name",
+                        "tag_id",
+                        "rebuild_from",
+                        "copy_repo",
+                        "delete",
+                        "type",
+                        "pkgname",
+                    )
+                    if key in subtask
+                },
+            )
+        )
         name = subtask.get("pkgname") or subtask.get("package")
         if not name and subtask.get("srpm"):
             filename = subtask["srpm"].rsplit("/", 1)[-1]
@@ -81,13 +97,17 @@ def parse_task(text: str, task_id: str) -> TaskSnapshot:
         name = package_name(name)
         present.add(name)
         # Existing rebuilds must not become roots during a repeated scan.
-        if (subtask.get("dir") or subtask.get("srpm")) and not subtask.get("rebuild_from"):
+        if (subtask.get("dir") or subtask.get("srpm")) and not subtask.get(
+            "rebuild_from"
+        ):
             if subtask.get("type", "srpm") == "srpm":
                 roots.add(name)
 
-    signature = hashlib.sha256(json.dumps(
-        [header.get("state"), header.get("test_only"), actions], sort_keys=True
-    ).encode()).hexdigest()
+    signature = hashlib.sha256(
+        json.dumps(
+            [header.get("state"), header.get("test_only"), actions], sort_keys=True
+        ).encode()
+    ).hexdigest()
     return TaskSnapshot(
         branch, signature, tuple(sorted(roots)), tuple(sorted(present)), tuple(notices)
     )

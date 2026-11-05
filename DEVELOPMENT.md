@@ -44,8 +44,14 @@ The legacy `REPOKEEP_LIVE_TESTS=1` variable is also supported.
 Install editable with `python -m pip install -e .`. Install the `build` development
 tool and run `python -m build` for wheel/sdist archives. CI tests Python 3.9, 3.13
 and 3.14, then installs both archives outside the checkout and checks all entry
-points. Run directly from a checkout with `PYTHONPATH=src python3 -m gearflow` or
-`./gear-update-upstream --help`.
+points. Run directly from a checkout with `PYTHONPATH=src python3 -m gearflow`.
+
+Python formatting and import checks use Ruff:
+
+```sh
+ruff check src tests
+ruff format --check src tests
+```
 
 Keep the `gear-update-upstream.resume` and `gear-update-upstream.last-update`
 Git config keys and legacy checkpoint reader compatible. An unknown Girar

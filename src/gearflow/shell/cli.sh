@@ -256,7 +256,7 @@ main() {
     check_common_commands
 
     # With no URL, prefer the current directory when it is a clean released
-    # gear package.  This makes `gear-update-upstream` useful directly from a
+    # gear package.  This makes `gearflow update` useful directly from a
     # package checkout while keeping the old URL/clone workflow as fallback.
     if [[ -z "$gear_url" ]]; then
         if git rev-parse --show-toplevel >/dev/null 2>&1; then

@@ -26,9 +26,11 @@ The existing MIT license covers both codebases. Monitoring source now lives unde
 
 `gearflow update DIR` uses an existing local checkout. Monitoring commands never
 start the package update workflow. `gearflow` without arguments prints help.
-Legacy `repokeep`, `python -m repokeep`, `gear-update-upstream` and root workflow
-flags such as `gearflow --resume DIR` continue to work. Compatibility Python
-imports forward to the same monitoring modules rather than a second code copy.
+Legacy `repokeep`, `python -m repokeep` and root workflow flags such as
+`gearflow --resume DIR` continue to work. The standalone `gear-update-upstream`
+file and its installed entry point were removed for gearflow 0.0.1; use the
+commands above. Compatibility Python imports forward to the same monitoring
+modules rather than a second code copy.
 
 ## Install and configuration
 

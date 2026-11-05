@@ -9,7 +9,7 @@ fi
 
 GEARFLOW_SHELL_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 GEARFLOW_PYTHON="${GEARFLOW_PYTHON:-python3}"
-# Also support the checkout launcher and direct sourcing in offline tests.
+# Also support source checkouts and direct sourcing in offline tests.
 export PYTHONPATH="${GEARFLOW_SHELL_DIR}/../..${PYTHONPATH:+:$PYTHONPATH}"
 
 for module in common git spec upstream layout prepare girar build state workflow cli; do

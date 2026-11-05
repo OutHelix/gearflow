@@ -1,9 +1,9 @@
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SHELL = ROOT / "src" / "gearflow" / "shell" / "main.sh"
@@ -15,14 +15,21 @@ class RepositoryTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.repo = Path(self.directory.name)
         self.env = os.environ.copy()
-        self.env.update({
-            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-            "GEARFLOW_PYTHON": sys.executable,
-            "GEARFLOW_TEST_REPOSITORY": str(self.repo),
-        })
+        self.env.update(
+            {
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GEARFLOW_PYTHON": sys.executable,
+                "GEARFLOW_TEST_REPOSITORY": str(self.repo),
+            }
+        )
         for name in (
-            "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-            "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
         ):
             self.env.pop(name, None)
         self.git("init", "-b", "sisyphus")
@@ -32,8 +39,12 @@ class RepositoryTest(unittest.TestCase):
 
     def git(self, *args):
         return subprocess.run(
-            ["git", *args], cwd=self.repo, env=self.env, text=True,
-            capture_output=True, check=True,
+            ["git", *args],
+            cwd=self.repo,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=True,
         ).stdout.strip()
 
     def write(self, path, text):
@@ -48,8 +59,19 @@ class RepositoryTest(unittest.TestCase):
 
     def shell(self, code, *args):
         return subprocess.run(
-            ["bash", "-c", 'source "$1"; shift; ' + code, "gearflow-test", str(SHELL), *args],
-            cwd=self.repo, env=self.env, text=True, capture_output=True, timeout=20,
+            [
+                "bash",
+                "-c",
+                'source "$1"; shift; ' + code,
+                "gearflow-test",
+                str(SHELL),
+                *args,
+            ],
+            cwd=self.repo,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            timeout=20,
         )
 
     def assertSuccess(self, result):

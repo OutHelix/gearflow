@@ -1,7 +1,7 @@
 # gearflow
 
 Release checks, security advisories, package updates and build tasks for ALT Linux
-maintainers. Combines repokeep monitoring with the gear-update-upstream workflow:
+maintainers. Combines repokeep monitoring with an interactive gear update workflow:
 GitHub tags, OSV, gear/hasher builds, resumable updates and Girar rebuilds.
 
 ## Install
@@ -35,7 +35,8 @@ Replace `scala` with your maintainer login. `check` defaults to Sisyphus; task
 lists cover all branches and exclude DONE. Add `--json` or `--no-color` to checks
 and task commands. `task -m scala -w 3` watches until `q` or Ctrl+C.
 Use `prepare`, `check-layout`, `migrate-layout` and `progress` for package helpers;
-run `gearflow --help` or `gearflow COMMAND --help` for options.
+run `gearflow --help` or `gearflow COMMAND --help` for options. `workflow-help`
+lists advanced update modes and environment settings.
 
 Updates create commits and signed tags, switch `origin` to
 `gitery:packages/<package>`, push and submit to Girar after build confirmation.
@@ -43,8 +44,9 @@ Resolve merge conflicts, finish `git commit --no-edit`, then run `gearflow resum
 `rebuild --dry-run` reads Girar/RDB and displays the plan without changing the task.
 OSV cannot account for ALT backports; dependency plans are not ABI comparisons.
 
-Existing `repokeep` and `gear-update-upstream` commands remain available.
-See [migration notes](MIGRATION.md) for old commands and config compatibility.
+The `repokeep` compatibility command remains available. The old standalone
+updater has been removed; use `gearflow update`. See [migration notes](MIGRATION.md)
+for old commands and config compatibility.
 
 ## Development
 

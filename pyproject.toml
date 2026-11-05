@@ -26,7 +26,6 @@ Issues = "https://github.com/OutHelix/gearflow/issues"
 
 [project.scripts]
 gearflow = "gearflow.cli:main"
-gear-update-upstream = "gearflow.cli:legacy_update_main"
 repokeep = "gearflow.monitor.cli:main"
 
 [tool.setuptools.dynamic]
@@ -39,3 +38,13 @@ namespaces = false
 
 [tool.setuptools.package-data]
 gearflow = ["shell/*.sh"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gearflow", "repokeep", "tests"]
