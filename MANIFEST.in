@@ -1,4 +1,5 @@
 include LICENSE README.md DEVELOPMENT.md SUGGESTIONS.md MIGRATION.md CHANGELOG.md
 recursive-include src/gearflow/shell *.sh
 recursive-include tests *.py *.txt *.json *.md
+recursive-include tools *.py *.sh *.txt
 global-exclude __pycache__ *.py[cod]

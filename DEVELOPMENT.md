@@ -53,6 +53,22 @@ tool and run `python -m build` for wheel/sdist archives. CI tests Python 3.9, 3.
 and 3.14, then installs both archives outside the checkout and checks all entry
 points. Run directly from a checkout with `PYTHONPATH=src python3 -m gearflow`.
 
+The Linux x86_64 executable includes Python and the Bash workflow. Build it with:
+
+```sh
+python -m pip install -r tools/requirements-binary.txt
+bash tools/build_binary.sh
+python tools/check_binary.py dist/gearflow-linux-x86_64
+```
+
+Build on Ubuntu 22.04 for a glibc 2.35 baseline. The binary workflow checks help,
+Bash resources, internal Python services, quiet builds and spawned API workers
+outside the checkout with no Python on PATH. Pushes and pull requests build a CI
+artifact; published releases also attach the executable and refresh `SHA256SUMS`.
+For an existing release, dispatch `binary.yml` with its `release_tag`. This checks
+out that tag's application sources and uses the current packaging tools, preserving
+the existing tag and Python archives.
+
 Python formatting and import checks use Ruff:
 
 ```sh

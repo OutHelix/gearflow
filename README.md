@@ -6,7 +6,17 @@ tracks Girar tasks. No third-party Python runtime dependencies.
 
 ## Install
 
-Python 3.9+. From the project directory:
+Download `gearflow-linux-x86_64` from [Releases](https://github.com/OutHelix/gearflow/releases/latest)
+for Linux x86_64 (glibc 2.35+). Python is included:
+
+```sh
+chmod +x gearflow-linux-x86_64
+mkdir -p ~/.local/bin
+install -m 755 gearflow-linux-x86_64 ~/.local/bin/gearflow
+gearflow --version
+```
+
+Alternatively, install the Python package with Python 3.9+. From the project directory:
 
 ```sh
 python3 -m venv .venv

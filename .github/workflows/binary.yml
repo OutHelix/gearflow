@@ -1,0 +1,70 @@
+name: Linux binary
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build and attach the binary to
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.event.release.tag_name || github.sha }}
+          path: release-src
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r tools/requirements-binary.txt
+      - name: Build standalone executable from the selected source ref
+        run: bash tools/build_binary.sh release-src
+      - name: Check executable without Python on PATH
+        run: python tools/check_binary.py release-src/dist/gearflow-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gearflow-linux-x86_64
+          path: release-src/dist/gearflow-linux-x86_64
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gearflow-linux-x86_64
+          path: binary
+      - name: Attach binary and update checksums for all release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+          mkdir assets
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir assets --skip-existing
+          cp binary/gearflow-linux-x86_64 assets/
+          (
+            cd assets
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' |
+              sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            assets/gearflow-linux-x86_64 assets/SHA256SUMS --clobber
