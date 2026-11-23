@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.3 — 2026-11-23
+## 0.0.4 — 2026-11-23
 
 - Include migrated packaging files in the layout commit even when their new paths
   match Git ignore rules. Report staging and commit failures immediately.
