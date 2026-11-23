@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.3 — 2026-11-23
+
+- Include migrated packaging files in the layout commit even when their new paths
+  match Git ignore rules. Report staging and commit failures immediately.
+- Honor `update DIR` after a layout migration commit when the release tag still
+  points to an earlier commit.
+- Reuse an existing `gear-commit` during Gitery-only publication, recreate the
+  signed release tag, and force-push the package branch and tag to Gitery.
+
 ## 0.0.2 — 2026-11-05
 
 - Add `build DIR --log FILE`: quiet hasher builds of prepared trees with exact
