@@ -376,7 +376,11 @@ class PublicationTests(SplitWorkflowTest):
         self.commit()
         self.git("tag", "1.0-alt1")
         old_tag = self.git("rev-parse", "refs/tags/1.0-alt1")
-        self.git("push", str(remote), "HEAD:refs/heads/sisyphus", "refs/tags/1.0-alt1")
+        self.assertSuccess(
+            self.shell(
+                'git push "$1" HEAD:refs/heads/sisyphus refs/tags/1.0-alt1', str(remote)
+            )
+        )
         self.git("switch", "sisyphus")
 
         result = self.command("publish", ".", "--gitery-only")
@@ -384,16 +388,11 @@ class PublicationTests(SplitWorkflowTest):
         self.assertIn("Packaging commit already exists", result.stdout)
         self.assertEqual(self.calls(), ["tag"])
         self.assertEqual(self.git("rev-parse", "HEAD"), head)
-        self.assertEqual(
-            self.git("--git-dir", str(remote), "rev-parse", "refs/heads/sisyphus"), head
-        )
+        self.assertEqual((remote / "refs/heads/sisyphus").read_text().strip(), head)
         new_tag = self.git("rev-parse", "refs/tags/1.0-alt1")
         self.assertNotEqual(new_tag, old_tag)
         self.assertEqual(self.git("rev-parse", "refs/tags/1.0-alt1^{commit}"), head)
-        self.assertEqual(
-            self.git("--git-dir", str(remote), "rev-parse", "refs/tags/1.0-alt1"),
-            new_tag,
-        )
+        self.assertEqual((remote / "refs/tags/1.0-alt1").read_text().strip(), new_tag)
 
     def test_failed_push_can_resume_without_recommitting_or_submitting_to_girar(self):
         self.initial_package()
