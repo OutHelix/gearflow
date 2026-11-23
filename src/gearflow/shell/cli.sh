@@ -23,7 +23,7 @@ Usage:
   $program -h|--help
 
 Update an ALT Linux gear package from an upstream Git tag.
-With no arguments, offer to update a clean released package in the current
+With no arguments, detect a released package in the current
 repository; otherwise prompt for an ALT gear repository URL.
 
 Options:
@@ -159,9 +159,15 @@ EOF
 
 main() {
     local PREPARE_ONLY=0
+    local local_repository=""
     if [[ "${1:-}" == --prepare-only ]]; then
         PREPARE_ONLY=1
         shift
+    fi
+    if [[ "${1:-}" == --local-repository ]]; then
+        (( $# == 2 )) || die "Usage: gearflow update DIR"
+        local_repository="$2"
+        shift 2
     fi
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
         show_help
@@ -266,9 +272,13 @@ main() {
 
     check_common_commands
 
-    # With no URL, prefer the current directory when it is a clean released
-    # gear package.  This makes `gearflow update` useful directly from a
-    # package checkout while keeping the old URL/clone workflow as fallback.
+    if [[ -n "$local_repository" ]]; then
+        workdir="$(git -C "$local_repository" rev-parse --show-toplevel 2>/dev/null)" \
+            || die "Not a Git repository: $local_repository"
+        cd "$workdir" || die "Could not open repository: $workdir"
+    fi
+
+    # With no explicit target, detect a released package before falling back to a URL.
     if [[ -z "$gear_url" ]]; then
         if git rev-parse --show-toplevel >/dev/null 2>&1; then
             if resume_state_exists; then
@@ -280,25 +290,32 @@ main() {
         detected="$(detect_current_release_repo || true)"
         if [[ -n "$detected" ]]; then
             IFS=$'\t' read -r workdir package detected_spec detected_version detected_release detected_tag <<< "$detected"
-
-            printf '\nDetected released gear package in the current repository:\n'
-            info "Package: $package"
-            info "Version: $detected_version"
-            info "Release tag: $detected_tag"
-
-            if ask_yes_no "Update package $package"; then
-                use_current_repo=1
-            else
-                printf 'Cancelled.\n'
-                return 0
-            fi
+            use_current_repo=1
+        elif [[ -n "$local_repository" ]]; then
+            [[ "$(git branch --show-current)" == "$TARGET_BRANCH" ]] \
+                || die "Switch to branch '$TARGET_BRANCH' before updating: $workdir"
+            package="$(basename "$workdir")"
+            use_current_repo=1
         else
             read -r -p "ALT gear repository URL: " gear_url
         fi
     fi
 
     if (( use_current_repo )); then
-        cd "$workdir"
+        cd "$workdir" || die "Could not open repository: $workdir"
+        working_tree_clean_except_backups \
+            || die "Working tree is not clean: $workdir. Commit or stash existing changes before updating."
+        if [[ -n "$detected" ]]; then
+            printf '\nDetected released gear package in the current repository:\n'
+            info "Package: $package"
+            info "Version: $detected_version"
+            info "Release tag: $detected_tag"
+
+            if ! ask_yes_no "Update package $package"; then
+                printf 'Cancelled.\n'
+                return 0
+            fi
+        fi
         info "Using current repository: $workdir"
     else
         gear_url="$(trim "$gear_url")"

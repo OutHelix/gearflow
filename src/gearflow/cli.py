@@ -29,7 +29,7 @@ LEGACY_MODES = {mode for mode, _ in WORKFLOW_MODES.values()} | {
 }
 
 
-def launch_update(argv: Sequence[str], repository: Optional[str] = None) -> int:
+def launch_update(argv: Sequence[str]) -> int:
     """Replace this process with the workflow, preserving its terminal and signals."""
     bash = shutil.which("bash")
     if bash is None:
@@ -46,8 +46,6 @@ def launch_update(argv: Sequence[str], repository: Optional[str] = None) -> int:
 
     script = Path(__file__).resolve().parent / "shell" / "main.sh"
     try:
-        if repository is not None:
-            os.chdir(repository)
         os.execve(bash, [bash, str(script), *argv], env)
     except OSError as error:
         print(f"ERROR: Could not start the gearflow workflow: {error}", file=sys.stderr)
@@ -209,7 +207,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return launch_update(prefix)
         path = Path(target).expanduser()
         if path.is_dir():
-            return launch_update(prefix, repository=os.fspath(path))
+            return launch_update([*prefix, "--local-repository", os.fspath(path)])
         if _is_repository_url(target):
             return launch_update([*prefix, target])
         root.error(f"repository directory not found: {target}")

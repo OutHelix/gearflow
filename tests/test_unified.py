@@ -57,7 +57,9 @@ class UnifiedCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with patch("gearflow.cli.launch_update", return_value=0) as run:
                 cli.main(["update", "--prepare-only", directory])
-                run.assert_called_once_with(["--prepare-only"], repository=directory)
+                run.assert_called_once_with(
+                    ["--prepare-only", "--local-repository", directory]
+                )
         with patch("gearflow.cli.launch_update", return_value=0) as run:
             cli.main(["update", "--prepare-only", "--resume", "."])
             run.assert_called_once_with(["--prepare-only", "--resume", "."])
@@ -96,7 +98,7 @@ class UnifiedCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="gearflow local package ") as repo:
             with patch("gearflow.cli.launch_update", return_value=0) as run:
                 self.assertEqual(cli.main(["update", repo]), 0)
-                run.assert_called_once_with([], repository=repo)
+                run.assert_called_once_with(["--local-repository", repo])
 
     def test_check_dispatch_uses_existing_validation_and_returns_its_exit_code(self):
         with patch.object(updates, "main", return_value=2) as check:

@@ -1,11 +1,10 @@
 # shellcheck shell=bash
 # SPDX-License-Identifier: MIT
 
-# Detect whether the current directory is already a clean released gear package.
-# A repository is considered safe for in-place update when:
+# Identify a released gear package. The caller checks the working tree before updating.
+# A repository is recognized when:
 #   * it is on the target branch;
 #   * .gear/rules and the main spec are present;
-#   * the working tree is clean;
 #   * the spec's <Version>-<Release> gear tag exists and points to HEAD.
 #
 # On success prints: <repo-root>\t<package>\t<spec>\t<version>\t<release>\t<tag>
@@ -19,7 +18,6 @@ detect_current_release_repo() {
 
         [[ -f .gear/rules ]] || exit 1
         [[ "$(git branch --show-current)" == "$TARGET_BRANCH" ]] || exit 1
-        working_tree_clean_except_backups || exit 1
 
         local package spec version release expected_tag tag_commit head_commit
         package="$(basename "$root")"

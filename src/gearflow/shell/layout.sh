@@ -510,7 +510,8 @@ rewrite_rules_paths() {
         # Replace complete shell-like arguments only.  This preserves comments,
         # indentation, quoting and all unrelated formatting in .gear/rules.
         rewrite_file_in_memory "$rules" sed -E \
-            "s#(^|[[:space:]='\"])${old_regex}([[:space:]'\"]|$)#\\1${new_replacement}\\2#g"
+            "s#(^|[[:space:]='\"])${old_regex}([[:space:]'\"]|$)#\\1${new_replacement}\\2#g" \
+            || return 1
     done
 }
 
@@ -542,13 +543,13 @@ add_layout_move_commit_paths() {
         while IFS= read -r -d '' child; do
             [[ "$child" == *~ ]] && continue
             relative="${child#"$source"/}"
-            if [[ -n "$(git ls-files -- "$child")" ]]; then
+            if [[ -n "$(git --literal-pathspecs ls-files -- "$child")" ]]; then
                 add_unique_path "$child"
             fi
             add_unique_path "$destination/$relative"
         done < <(find "$source" \( -type f -o -type l \) -print0)
     else
-        if [[ -n "$(git ls-files -- "$source")" ]]; then
+        if [[ -n "$(git --literal-pathspecs ls-files -- "$source")" ]]; then
             add_unique_path "$source"
         fi
         add_unique_path "$destination"
@@ -569,10 +570,11 @@ protect_existing_layout_changes() {
     for path in "${protected_paths[@]}"; do
         # Untracked migration sources are intentional packaging inputs.  Only
         # protect paths that already belong to the current Git revision/index.
-        if [[ -z "$(git ls-files -- "$path")" ]]; then
+        if [[ -z "$(git --literal-pathspecs ls-files -- "$path")" ]]; then
             continue
         fi
-        if ! git diff --quiet -- "$path" || ! git diff --cached --quiet -- "$path"; then
+        if ! git --literal-pathspecs diff --quiet -- "$path" ||
+           ! git --literal-pathspecs diff --cached --quiet -- "$path"; then
             conflicts+=("$path")
         fi
     done
@@ -590,7 +592,7 @@ apply_layout_migration() {
     local i source destination spec
     LAYOUT_COMMIT_PATHS=()
 
-    if [[ -n "$PREPARE_RULES_OLD_PATH" && -n "$(git ls-files -- "$PREPARE_RULES_OLD_PATH")" ]]; then
+    if [[ -n "$PREPARE_RULES_OLD_PATH" && -n "$(git --literal-pathspecs ls-files -- "$PREPARE_RULES_OLD_PATH")" ]]; then
         add_unique_path "$PREPARE_RULES_OLD_PATH"
         add_unique_path "$rules"
     elif (( ${#MIGRATION_RULE_OLD[@]} > 0 )); then
@@ -618,15 +620,15 @@ apply_layout_migration() {
         add_layout_move_commit_paths "$source" "$destination"
     done
 
-    mkdir -p altlinux
+    mkdir -p altlinux || die "Could not create the altlinux directory"
     for (( i = 0; i < ${#MIGRATION_MOVE_SOURCE[@]}; i++ )); do
         source="${MIGRATION_MOVE_SOURCE[i]}"
         destination="${MIGRATION_MOVE_DEST[i]}"
-        mkdir -p "$(dirname "$destination")"
-        mv -- "$source" "$destination"
+        mkdir -p "$(dirname "$destination")" || die "Could not create the parent directory for $destination"
+        mv -- "$source" "$destination" || die "Could not move $source to $destination"
     done
 
-    rewrite_rules_paths "$rules"
+    rewrite_rules_paths "$rules" || die "Could not rewrite $rules for the layout migration"
 
     # Remove only now-empty obsolete directories.  Keep the three allowed
     # metadata locations even when they are temporarily empty.
@@ -645,18 +647,21 @@ apply_layout_migration() {
     # Stage and commit only paths changed by the migration.  Existing staged
     # changes outside this list remain staged and cannot leak into the layout
     # commit.
-    git add -A -- "${LAYOUT_COMMIT_PATHS[@]}"
+    # A destination can match an upstream ignore rule even for a tracked source.
+    git --literal-pathspecs add -A -f -- "${LAYOUT_COMMIT_PATHS[@]}" \
+        || die "Could not stage the layout migration. Inspect 'git status' before retrying."
 
-    if git diff-index --cached --quiet HEAD -- "${LAYOUT_COMMIT_PATHS[@]}"; then
+    if git --literal-pathspecs diff-index --cached --quiet HEAD -- "${LAYOUT_COMMIT_PATHS[@]}"; then
         die "Layout migration produced no staged changes"
     fi
 
     printf '\nLayout commit changes:\n'
-    git -c color.status=always --no-pager status --short --untracked-files=no -- \
+    git --literal-pathspecs -c color.status=always --no-pager status --short --untracked-files=no -- \
         "${LAYOUT_COMMIT_PATHS[@]}"
 
     log "Creating separate layout commit"
-    git commit --only -m "$LAYOUT_COMMIT_MESSAGE" -- "${LAYOUT_COMMIT_PATHS[@]}"
+    git --literal-pathspecs commit --only -m "$LAYOUT_COMMIT_MESSAGE" -- "${LAYOUT_COMMIT_PATHS[@]}" \
+        || die "Could not commit the layout migration. Fix the Git error, review and commit the staged migration, then run 'gearflow update .' again."
     info "Layout migration commit: $(git rev-parse --short HEAD)"
 
     PREPARE_RULES_OLD_PATH=""

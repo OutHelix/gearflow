@@ -33,24 +33,57 @@ class LayoutTests(RepositoryTest):
             ".gear/rules",
             "# keep comment\nspec: demo.spec\ntar: v@version@:.\ncopy: .gear/service\n",
         )
+        self.write(".gitignore", "/altlinux/service*\n")
         self.write(".gear/service", "service\n")
         self.write("unrelated.txt", "before\n")
         self.commit()
         self.write("unrelated.txt", "staged change\n")
         self.git("add", "unrelated.txt")
+        self.write("altlinux/service.local", "ignored local file\n")
         result = self.shell(
-            "collect_layout_migration_plan .gear/rules demo.spec demo; "
-            "PROTECT_LAYOUT_COMMIT=1; apply_layout_migration .gear/rules demo"
+            "PROTECT_LAYOUT_COMMIT=1; "
+            "if ! ensure_altlinux_layout_interactive .gear/rules demo <<< m; then exit 1; fi"
         )
         self.assertSuccess(result)
         self.assertTrue((self.repo / "altlinux/demo.spec").exists())
-        self.assertTrue((self.repo / "altlinux/service").exists())
+        self.assertEqual(self.git("show", "HEAD:altlinux/service"), "service")
+        self.assertEqual(self.git("ls-files", "altlinux/service.local"), "")
         self.assertEqual(self.git("diff", "--cached", "--name-only"), "unrelated.txt")
         self.assertEqual(self.git("show", "HEAD:unrelated.txt"), "before")
         rules = (self.repo / ".gear/rules").read_text()
         self.assertIn("# keep comment", rules)
         self.assertIn("tar: v@version@:.", rules)
         self.assertIn("spec: altlinux/demo.spec", rules)
+
+    def test_failed_layout_commit_leaves_changes_staged_and_stops_update(self):
+        self.write(".gear/demo.spec", SPEC)
+        self.write(".gear/rules", "spec: .gear/demo.spec\ntar: v@version@:.\n")
+        self.commit()
+        head = self.git("rev-parse", "HEAD")
+        self.git("tag", "1.0-alt1")
+        hook = self.repo / ".git/hooks/pre-commit"
+        hook.write_bytes(b"#!/bin/sh\nexit 1\n")
+        hook.chmod(0o755)
+        result = self.shell("check_common_commands() { :; }; main <<< $'y\\nm'")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not commit the layout migration", result.stderr)
+        self.assertNotIn("Layout migration commit:", result.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        self.assertIn("altlinux/demo.spec", self.git("diff", "--cached", "--name-only"))
+
+        result = self.shell("check_common_commands() { :; }; main </dev/null")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Working tree is not clean", result.stderr)
+
+        hook.unlink()
+        self.git("commit", "-m", "Moved packaging files to altlinux directory")
+        result = self.shell(
+            "check_common_commands() { :; }; "
+            "load_upstream_tags() { printf 'Reached upstream tag check\\n'; exit 0; }; "
+            "main --local-repository . </dev/null"
+        )
+        self.assertSuccess(result)
+        self.assertIn("Reached upstream tag check", result.stdout)
 
     def test_rules_tokenizer_preserves_spaces_and_rejects_unclosed_quotes(self):
         result = self.shell(

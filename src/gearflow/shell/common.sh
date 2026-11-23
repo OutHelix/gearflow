@@ -81,6 +81,6 @@ rewrite_file_in_memory() {
     original="$(cat -- "$file" && printf '\001')" || return 1
     updated="$("$@" "$file" && printf '\001')" || return 1
     [[ "$original" != "$updated" ]] || return 0
-    printf '%s' "${updated%$'\001'}" > "$file"
+    printf '%s' "${updated%$'\001'}" > "$file" || return 1
     FILE_REWRITE_CHANGED=1
 }
