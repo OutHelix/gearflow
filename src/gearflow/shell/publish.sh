@@ -1,8 +1,16 @@
 # shellcheck shell=bash
 # SPDX-License-Identifier: MIT
 
+head_is_gear_commit() {
+    local version_release="$1"
+
+    # gear-commit uses the latest changelog entry's Version-Release as its default subject.
+    [[ "$(git log -1 --format=%s HEAD)" == "$version_release" ]]
+}
+
 publish_gitery_only() {
     local repo_path="${1:-.}" root package spec version release head name
+    local next_stage=""
     need_cmd git
     root="$(git -C "$repo_path" rev-parse --show-toplevel 2>/dev/null)" \
         || die "Not a Git repository: $repo_path"
@@ -34,7 +42,6 @@ publish_gitery_only() {
             || die "Publish requires branch '$TARGET_BRANCH'"
 
         "$GEARFLOW_PYTHON" -m gearflow.services stage
-        git diff --cached --quiet -- && die "No packaging changes to publish"
         head="$(git rev-parse --verify HEAD)" || die "An initial Git commit is required before publication"
         # Initial builds have no selected upstream tag. Use the same checkpoint
         # schema, with Gitery-only intent saved separately before any commit.
@@ -51,6 +58,13 @@ publish_gitery_only() {
         TAG_SCHEME_OLD_TEMPLATE=""
         TAG_SCHEME_NEW_TEMPLATE=""
         LAYOUT_MIGRATION_SKIPPED=0
+        if git diff --cached --quiet --; then
+            if ! working_tree_clean_except_backups || ! head_is_gear_commit "$version-$release"; then
+                die "No packaging changes to publish and HEAD does not match the gear-commit subject '$version-$release'"
+            fi
+            info "Packaging commit already exists: $(git rev-parse --short HEAD)"
+            RESUME_STAGE=tag
+        fi
         git config --local --replace-all gearflow.gitery-only true
         save_resume_state
     fi
@@ -61,14 +75,23 @@ publish_gitery_only() {
             check_resume_metadata
             "$GEARFLOW_PYTHON" -m gearflow.services stage
             if [[ "$RESUME_STAGE" == build ]]; then
-                [[ "$(git rev-parse HEAD)" == "$RESUME_HEAD" ]] || die "HEAD changed since preparation"
-                git diff --cached --quiet -- && die "No packaging changes to publish"
+                next_stage=commit
+                if [[ "$(git rev-parse HEAD)" != "$RESUME_HEAD" ]]; then
+                    [[ "$(git rev-parse HEAD^ 2>/dev/null)" == "$RESUME_HEAD" ]] && \
+                        working_tree_clean_except_backups && \
+                        head_is_gear_commit "$RESUME_VERSION-$RESUME_RELEASE" \
+                        || die "HEAD changed unexpectedly since preparation"
+                    info "Packaging commit already exists: $(git rev-parse --short HEAD)"
+                    next_stage=tag
+                else
+                    git diff --cached --quiet -- && die "No packaging changes to publish"
+                fi
             fi
             ;;
         *) working_tree_clean_except_backups || die "Uncommitted changes appeared after gear-commit" ;;
     esac
     # This survives failed tag creation/push and is honored by ordinary resume.
     git config --local --replace-all gearflow.gitery-only true
-    [[ "$RESUME_STAGE" != build ]] || advance_resume_stage commit
+    [[ -z "$next_stage" ]] || advance_resume_stage "$next_stage"
     run_saved_update
 }

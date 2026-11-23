@@ -124,7 +124,7 @@ git commit -m 'prepared package'
             "gear-create-tag",
             f"""
 printf 'tag\\n' >> "$GEARFLOW_TEST_TRACE"
-git tag -a {version}-alt1 -m 'Test tag
+git tag "$@" -a {version}-alt1 -m 'Test tag
 -----BEGIN PGP SIGNATURE-----
 test-only signature fixture'
 """,
@@ -362,6 +362,37 @@ class PublicationTests(SplitWorkflowTest):
                 "! git config --local --get gearflow.gitery-only && "
                 "! git config --local --get gear-update-upstream.resume"
             )
+        )
+
+    def test_publish_reuses_gear_commit_and_replaces_diverged_branch_and_tag(self):
+        self.initial_package()
+        remote = self.publication_tools()
+        self.git("add", "--", "source.txt")
+        self.git("commit", "-m", "1.0-alt1")
+        head = self.git("rev-parse", "HEAD")
+
+        self.git("switch", "-c", "previous-release", "HEAD^")
+        self.write("source.txt", "different remote release\n")
+        self.commit()
+        self.git("tag", "1.0-alt1")
+        old_tag = self.git("rev-parse", "refs/tags/1.0-alt1")
+        self.git("push", str(remote), "HEAD:refs/heads/sisyphus", "refs/tags/1.0-alt1")
+        self.git("switch", "sisyphus")
+
+        result = self.command("publish", ".", "--gitery-only")
+        self.assertSuccess(result)
+        self.assertIn("Packaging commit already exists", result.stdout)
+        self.assertEqual(self.calls(), ["tag"])
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        self.assertEqual(
+            self.git("--git-dir", str(remote), "rev-parse", "refs/heads/sisyphus"), head
+        )
+        new_tag = self.git("rev-parse", "refs/tags/1.0-alt1")
+        self.assertNotEqual(new_tag, old_tag)
+        self.assertEqual(self.git("rev-parse", "refs/tags/1.0-alt1^{commit}"), head)
+        self.assertEqual(
+            self.git("--git-dir", str(remote), "rev-parse", "refs/tags/1.0-alt1"),
+            new_tag,
         )
 
     def test_failed_push_can_resume_without_recommitting_or_submitting_to_girar(self):

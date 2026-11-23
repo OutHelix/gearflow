@@ -70,10 +70,12 @@ Review the exit status and log before publishing:
 gearflow publish ./maven --gitery-only
 ```
 
-Publication stages current fixes, runs `gear-commit`, creates a signed tag, switches
-`origin` to `gitery:packages/<package>` and pushes the branch/tag. It does not build
-or create/start a Girar task. Retry an interrupted publication with the same command
-or `gearflow resume ./maven`; Gitery-only intent is preserved.
+Publication stages current fixes and runs `gear-commit`. If the tree is clean and
+`HEAD` has the default `Version-Release` commit subject, publication uses that commit.
+It recreates the signed tag, switches `origin` to `gitery:packages/<package>` and
+force-pushes the `sisyphus` branch and release tag. It does not build or submit to
+Girar. Retry an interrupted publication with the same command or
+`gearflow resume ./maven`.
 
 For the complete interactive update/build/Girar workflow, use `gearflow update DIR`
 or `gearflow update URL`. Other helpers: `prepare`, `check-layout`, `migrate-layout`,

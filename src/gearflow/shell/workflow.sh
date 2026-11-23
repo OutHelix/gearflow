@@ -148,7 +148,11 @@ run_saved_update() {
                 ;;
             tag)
                 RESUME_GEAR_TAG="$RESUME_VERSION-$RESUME_RELEASE"
-                if ! git show-ref --verify --quiet "refs/tags/$RESUME_GEAR_TAG"; then
+                if (( gitery_only )); then
+                    need_cmd gear-create-tag
+                    log "Creating or replacing signed gear tag: $RESUME_GEAR_TAG"
+                    gear-create-tag --force
+                elif ! git show-ref --verify --quiet "refs/tags/$RESUME_GEAR_TAG"; then
                     need_cmd gear-create-tag
                     log "Creating signed gear tag"
                     gear-create-tag
@@ -175,11 +179,19 @@ run_saved_update() {
                 fi
                 if [[ "$RESUME_STAGE" == push-branch ]]; then
                     log "Pushing branch: $TARGET_BRANCH"
-                    git push -u origin "$TARGET_BRANCH"
+                    if (( gitery_only )); then
+                        git push -u --no-follow-tags origin "+refs/heads/$TARGET_BRANCH:refs/heads/$TARGET_BRANCH"
+                    else
+                        git push -u origin "$TARGET_BRANCH"
+                    fi
                     advance_resume_stage push-tag
                 else
                     log "Pushing gear tag: $RESUME_GEAR_TAG"
-                    git push origin "$RESUME_GEAR_TAG"
+                    if (( gitery_only )); then
+                        git push --no-follow-tags origin "+refs/tags/$RESUME_GEAR_TAG:refs/tags/$RESUME_GEAR_TAG"
+                    else
+                        git push origin "$RESUME_GEAR_TAG"
+                    fi
                     advance_resume_stage girar
                 fi
                 ;;
