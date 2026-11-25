@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.5 — 2026-11-25
+
+- Move Girar reverse dependency planning and submission to `task rebuild`.
+- Add local `rebuild` to clone and build reverse dependencies in RDB order
+  with hasher, with optional filtering of existing Beehive failures.
+- Save the rebuild queue and log each package as `BUILDING`, `DONE` or
+  `FAILED`. Resume retries the interrupted package.
+- Shorten the README command and option reference.
+
 ## 0.0.4 — 2026-11-23
 
 - Include migrated packaging files in the layout commit even when their new paths
