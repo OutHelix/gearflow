@@ -16,10 +16,13 @@ class UnifiedCliTests(unittest.TestCase):
             ["update", "/nonexistent-gearflow-release-test"],
             ["update", "one", "two"],
             ["resume", "one", "two"],
-            ["rebuild", "0"],
-            ["rebuild", "-1"],
-            ["rebuild", "invalid"],
-            ["rebuild", "123", "--unknown"],
+            ["task", "rebuild", "0"],
+            ["task", "rebuild", "-1"],
+            ["task", "rebuild", "invalid"],
+            ["task", "rebuild", "123", "--unknown"],
+            ["rebuild", "123"],
+            ["rebuild", "--with-ftbfs", "--without-ftbfs"],
+            ["rebuild", "--resume", "--with-ftbfs"],
             ["update", "--resume", "https://example.invalid/demo.git"],
             ["update", "--resume", "--continue"],
             ["update", "--prepare-only", "--continue", "."],
@@ -84,7 +87,10 @@ class UnifiedCliTests(unittest.TestCase):
         cases = [
             (["resume", "path with spaces"], ["--resume", "path with spaces"]),
             (["prepare", "./demo"], ["--prepare-package", "./demo"]),
-            (["rebuild", "123", "--dry-run"], ["--scan-task", "123", "--dry-run"]),
+            (
+                ["task", "rebuild", "123", "--dry-run"],
+                ["--scan-task", "123", "--dry-run"],
+            ),
         ]
         for args, expected in cases:
             with (
@@ -93,6 +99,20 @@ class UnifiedCliTests(unittest.TestCase):
             ):
                 self.assertEqual(cli.main(args), 0)
                 run.assert_called_once_with(expected)
+
+    def test_local_rebuild_dispatches_flags_without_bash(self):
+        for flags, resume, ftbfs in (
+            ([], False, None),
+            (["--with-ftbfs"], False, True),
+            (["--without-ftbfs"], False, False),
+            (["--resume"], True, None),
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch("gearflow.rebuild.rebuild_packages", return_value=0) as run,
+            ):
+                self.assertEqual(cli.main(["rebuild", *flags]), 0)
+                run.assert_called_once_with(Path.cwd(), resume=resume, ftbfs=ftbfs)
 
     def test_update_uses_selected_local_directory(self):
         with tempfile.TemporaryDirectory(prefix="gearflow local package ") as repo:

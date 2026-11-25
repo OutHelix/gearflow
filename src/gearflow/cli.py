@@ -58,12 +58,6 @@ def _add_version(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _task_id(value: str) -> str:
-    if not re.fullmatch(r"[1-9][0-9]*", value):
-        raise argparse.ArgumentTypeError("task ID must be a positive integer")
-    return value
-
-
 def _is_repository_url(value: str) -> bool:
     return bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", value)) or bool(
         re.match(r"^(?:[^/@:]+@)?[^/:]+:.+", value)
@@ -80,7 +74,7 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command")
     for name, help_text in (
         ("check", "check upstream releases and OSV advisories"),
-        ("task", "list or inspect Girar tasks; supports watch mode"),
+        ("task", "list, inspect or add rebuilds to Girar tasks"),
     ):
         # These commands use the monitor's complete parsers, loaded on demand.
         commands.add_parser(name, help=help_text, add_help=False)
@@ -122,15 +116,28 @@ def parser() -> argparse.ArgumentParser:
 
     rebuild = commands.add_parser(
         "rebuild",
-        help="plan and add reverse dependency rebuilds for a Girar task",
-        description="Read Girar/RDB and add missing rebuilds after confirmation.",
+        help="rebuild reverse dependencies locally with hasher",
+        description="Select a local gear package and build its RDB reverse dependencies.",
     )
     _add_version(rebuild)
-    rebuild.add_argument("task_id", nargs="?", type=_task_id, metavar="TASK")
-    rebuild.add_argument(
-        "--dry-run",
+    rebuild_mode = rebuild.add_mutually_exclusive_group()
+    rebuild_mode.add_argument(
+        "--resume",
         action="store_true",
-        help="display the plan without changing or starting the task",
+        help="continue the saved local rebuild, retrying an interrupted package",
+    )
+    rebuild_mode.add_argument(
+        "--with-ftbfs",
+        dest="ftbfs",
+        action="store_true",
+        default=None,
+        help="include reverse dependencies already failing in Beehive",
+    )
+    rebuild_mode.add_argument(
+        "--without-ftbfs",
+        dest="ftbfs",
+        action="store_false",
+        help="skip reverse dependencies already failing in Beehive",
     )
 
     workflow = commands.add_parser(
@@ -212,12 +219,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return launch_update([*prefix, target])
         root.error(f"repository directory not found: {target}")
     if options.command == "rebuild":
-        workflow_args = ["--scan-task"]
-        if options.task_id:
-            workflow_args.append(options.task_id)
-        if options.dry_run:
-            workflow_args.append("--dry-run")
-        return launch_update(workflow_args)
+        from .rebuild import rebuild_packages
+
+        return rebuild_packages(Path.cwd(), resume=options.resume, ftbfs=options.ftbfs)
     mode = WORKFLOW_MODES[options.command][0]
     return launch_update(
         [mode, *([options.target] if options.target is not None else [])]

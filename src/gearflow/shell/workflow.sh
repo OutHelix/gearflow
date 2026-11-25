@@ -210,7 +210,7 @@ run_saved_update() {
             girar-pending)
                 warn "The previous Girar step was interrupted; its submission result is unknown."
                 info "To reuse an empty task, choose retry, answer no to standalone and enter its task number."
-                info "For an existing task with unfinished rebuilds, use --scan-task TASK first."
+                info "For an existing task with unfinished rebuilds, use task rebuild TASK first."
                 while true; do
                     read -r -p "Check Girar, then choose: [d]already submitted, [r]retry submission, [q]uit: " answer
                     case "${answer,,}" in

@@ -1,10 +1,17 @@
 import argparse
 import multiprocessing
 import os
+import re
 import signal
 import sys
 
 from . import __version__, tasks, updates
+
+
+def _task_id(value):
+    if not re.fullmatch(r"[1-9][0-9]*", value):
+        raise argparse.ArgumentTypeError("task ID must be a positive integer")
+    return value
 
 
 def parser(prog="repokeep", check_command="update"):
@@ -24,6 +31,19 @@ def parser(prog="repokeep", check_command="update"):
     actions = task_parser.add_subparsers(dest="task_action")
     show_parser = actions.add_parser("show", help="show one task with all details")
     tasks.configure_show_parser(show_parser)
+    if prog == "gearflow":
+        rebuild = actions.add_parser(
+            "rebuild", help="plan and add reverse dependency rebuilds to a Girar task"
+        )
+        rebuild.add_argument("task_id", nargs="?", type=_task_id, metavar="TASK")
+        rebuild.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="display the plan without changing or starting the task",
+        )
+        rebuild.add_argument(
+            "--version", action="version", version="%(prog)s " + __version__
+        )
     return root, {
         check_command: update_parser,
         "task": task_parser,
@@ -38,6 +58,15 @@ def run(argv=None, *, prog="repokeep", check_command="update"):
     if args.command == check_command:
         updates.validate_args(args, selected)
         return updates.main(args, selected)
+    if args.task_action == "rebuild":
+        from ..cli import launch_update
+
+        workflow_args = ["--scan-task"]
+        if args.task_id is not None:
+            workflow_args.append(args.task_id)
+        if args.dry_run:
+            workflow_args.append("--dry-run")
+        return launch_update(workflow_args)
     tasks.validate_args(
         args, commands["show"] if args.task_action == "show" else selected
     )

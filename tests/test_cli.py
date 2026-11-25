@@ -65,7 +65,7 @@ class CliTests(unittest.TestCase):
         for command, expected in (
             ("update", "DIR|URL"),
             ("resume", "DIR"),
-            ("rebuild", "TASK"),
+            ("rebuild", "--resume"),
             ("build", "--log"),
             ("publish", "--gitery-only"),
         ):
