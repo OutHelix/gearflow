@@ -1,12 +1,16 @@
+import io
 import json
 import os
 import signal
+import sys
 import tempfile
 import unittest
 from contextlib import nullcontext
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import ANY, patch
 
+from gearflow import build as gear_build
 from gearflow import rebuild
 from gearflow.rdb import SourceRelease
 
@@ -21,8 +25,10 @@ class LocalRebuildTests(unittest.TestCase):
         ]
         attempts = []
 
-        def run(command, cwd, output, *, stop_on_signal):
+        def run(command, cwd, output, *, stop_on_signal, tee=False):
             self.assertTrue(stop_on_signal)
+            if output is not None:
+                self.assertTrue(tee)
             if cwd == source:
                 attempts.append(("source", cwd.name))
                 self.assertEqual(command, rebuild.BUILD_COMMAND)
@@ -46,6 +52,7 @@ class LocalRebuildTests(unittest.TestCase):
                     f"[{plan.index(package) + 1}/4] BUILDING {package.name}.git={package.tag}",
                 )
                 origin = url.split("/")[3]
+                output.write(f"clone from {origin}\n".encode())
                 attempts.append((origin, f"{package.name}.git"))
                 self.assertIn(origin, ("gears", "srpms"))
                 self.assertEqual(command[command.index("--branch") + 1], package.tag)
@@ -73,6 +80,7 @@ class LocalRebuildTests(unittest.TestCase):
                 ],
             )
             if package.name == "broken":
+                output.write(b"build error details\n")
                 return 130
             if (
                 package.name == "paused"
@@ -126,6 +134,18 @@ class LocalRebuildTests(unittest.TestCase):
                     "[4/4] DONE     cglib.git=3.3.0-alt1_7jpp11",
                 ],
             )
+            self.assertEqual(
+                (work / "missing.failed.log").read_text().splitlines(),
+                ["clone from gears", "clone from srpms", "", "Exit status: 128"],
+            )
+            self.assertIn(
+                "build error details", (work / "broken.failed.log").read_text()
+            )
+            self.assertEqual(
+                sorted(path.name for path in work.glob("*.failed.log")),
+                ["broken.failed.log", "missing.failed.log"],
+            )
+            self.assertEqual(list(work.glob(".build-*")), [])
             self.assertEqual(
                 attempts,
                 [
@@ -183,6 +203,9 @@ class LocalRebuildTests(unittest.TestCase):
                 self.assertEqual(
                     rebuild.rebuild_packages(root, resume=True, ftbfs=None), 7
                 )
+                self.assertIn(
+                    "Exit status: 7", (workspace / "demo.source-build.log").read_text()
+                )
                 self.assertEqual(
                     json.loads(checkpoint.read_text())["preparation"], "source"
                 )
@@ -209,8 +232,26 @@ class LocalRebuildTests(unittest.TestCase):
                     ],
                 )
                 build.assert_called_once_with(
-                    workspace, SourceRelease("waiting", "2", "alt1")
+                    workspace, SourceRelease("waiting", "2", "alt1"), ANY
                 )
+
+    @unittest.skipUnless(os.name == "posix", "requires a POSIX build process")
+    def test_build_tee_keeps_stdout_and_stderr_in_the_log_and_terminal(self):
+        output, terminal = io.BytesIO(), io.BytesIO()
+        with patch.object(gear_build.sys, "stdout", SimpleNamespace(buffer=terminal)):
+            status = gear_build.run_build_command(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os; os.write(1, b'out'); os.write(2, b'err')",
+                ],
+                Path.cwd(),
+                output,
+                tee=True,
+            )
+        self.assertEqual(status, 0)
+        self.assertEqual(output.getvalue(), b"outerr")
+        self.assertEqual(terminal.getvalue(), b"outerr")
 
     def test_log_columns_stay_aligned_as_index_grows(self):
         release = SourceRelease("cglib", "3.3.0", "alt1_7jpp11")

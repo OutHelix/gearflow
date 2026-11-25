@@ -5,6 +5,7 @@
 - Build the selected package, initialize hasher once, and build dependencies
   with `hsh`. Save preparation progress.
 - Add `rebuild --clear` to remove local rebuild directories after confirmation.
+- Keep individual failure logs beside `rebuild.log`.
 - Fall back to the SRPM import repository when a rebuild tag cannot be cloned
   from the gear repository.
 - Align rebuild log columns and show the status before the package and version.

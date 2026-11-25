@@ -178,7 +178,33 @@ def _write_log(
     )
 
 
-def _clone(directory: Path, destination: Path, package: SourceRelease) -> int:
+def _report_build(directory: Path, filename: str, build) -> int:
+    with tempfile.NamedTemporaryFile(
+        prefix=".build-", dir=directory, delete=False
+    ) as log:
+        temporary = Path(log.name)
+        try:
+            try:
+                status = build(log)
+            except (OSError, ValueError) as error:
+                print(error, file=sys.stderr)
+                log.write(f"ERROR: {error}\n".encode())
+                status = 1
+            if status:
+                log.write(f"\nExit status: {status}\n".encode())
+                log.flush()
+                os.fsync(log.fileno())
+                log.close()
+                destination = directory / filename
+                temporary.replace(destination)
+                print(f"Failed build log: {destination}", flush=True)
+            return status
+        finally:
+            log.close()
+            temporary.unlink(missing_ok=True)
+
+
+def _clone(directory: Path, destination: Path, package: SourceRelease, output) -> int:
     name = quote(package.name, safe="")
     for collection in ("gears", "srpms"):
         url = f"https://git.altlinux.org/{collection}/{name[0]}/{name}.git"
@@ -188,15 +214,17 @@ def _clone(directory: Path, destination: Path, package: SourceRelease) -> int:
             status = run_build_command(
                 ["git", "clone", "--branch", package.tag, "--", url, str(checkout)],
                 directory,
-                None,
+                output,
                 stop_on_signal=True,
+                tee=True,
             )
             if status == 0:
                 status = run_build_command(
                     ["git", "checkout", "--detach", f"refs/tags/{package.tag}"],
                     checkout,
-                    None,
+                    output,
                     stop_on_signal=True,
+                    tee=True,
                 )
                 if status == 0:
                     checkout.rename(destination)
@@ -206,15 +234,17 @@ def _clone(directory: Path, destination: Path, package: SourceRelease) -> int:
     return status
 
 
-def _build(directory: Path, package: SourceRelease) -> int:
+def _build(directory: Path, package: SourceRelease, output) -> int:
     destination = directory / f"{package.name}.git"
     if destination.is_symlink():
         raise ValueError(f"unexpected symlink: {destination}")
     if not destination.exists():
-        status = _clone(directory, destination, package)
+        status = _clone(directory, destination, package, output)
         if status:
             return status
-    return run_build_command(BUILD_COMMAND, destination, None, stop_on_signal=True)
+    return run_build_command(
+        BUILD_COMMAND, destination, output, stop_on_signal=True, tee=True
+    )
 
 
 @contextmanager
@@ -267,7 +297,13 @@ def _run_queue(directory: Path, progress: Optional[RebuildProgress] = None) -> i
             progress.source = source.name
             save_progress()
             print(f"Building source package: {source.name}", flush=True)
-            status = run_build_command(BUILD_COMMAND, source, None, stop_on_signal=True)
+            status = _report_build(
+                directory,
+                f"{source.name}.source-build.log",
+                lambda output: run_build_command(
+                    BUILD_COMMAND, source, output, stop_on_signal=True, tee=True
+                ),
+            )
             if status:
                 print(
                     "Source package build failed. Use --resume to retry.",
@@ -293,11 +329,11 @@ def _run_queue(directory: Path, progress: Optional[RebuildProgress] = None) -> i
         for index, package in enumerate(plan[len(results) :], len(results) + 1):
             _write_log(directory, plan, results, building=True)
             print(_result_line(index, len(plan), package, "BUILDING"), flush=True)
-            try:
-                status = _build(directory, package)
-            except (OSError, ValueError) as error:
-                print(f"{package.name}: {error}", file=sys.stderr)
-                status = 1
+            status = _report_build(
+                directory,
+                f"{package.name}.failed.log",
+                lambda output: _build(directory, package, output),
+            )
             result = "DONE" if status == 0 else "FAILED"
             results.append(result)
             save_progress()

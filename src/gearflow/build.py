@@ -27,12 +27,14 @@ class BuildInterrupted(Exception):
         self.status = 128 + signum
 
 
-def run_build_command(command, root: Path, output, *, stop_on_signal=False) -> int:
+def run_build_command(
+    command, root: Path, output, *, stop_on_signal=False, tee=False
+) -> int:
     with subprocess.Popen(
         command,
         cwd=root,
         stdin=subprocess.DEVNULL,
-        stdout=output,
+        stdout=subprocess.PIPE if tee else output,
         stderr=subprocess.STDOUT,
         start_new_session=True,
     ) as process:
@@ -51,6 +53,16 @@ def run_build_command(command, root: Path, output, *, stop_on_signal=False) -> i
             if threading.current_thread() is threading.main_thread():
                 for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                     previous[signum] = signal.signal(signum, forward)
+            if tee:
+                terminal = sys.stdout.buffer
+                while chunk := process.stdout.read1(65536):
+                    output.write(chunk)
+                    if terminal is not None:
+                        try:
+                            terminal.write(chunk)
+                            terminal.flush()
+                        except BrokenPipeError:
+                            terminal = None
             status = process.wait()
             if stop_on_signal and interrupted is not None:
                 raise BuildInterrupted(interrupted)
