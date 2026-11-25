@@ -10,9 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 LOG_CONFIG_KEY = "gearflow.build-log"
-BUILD_COMMAND = [
-    "gear",
-    "--commit",
+HASHER_ARGS = [
     "--hasher",
     "--",
     "hsh",
@@ -20,15 +18,21 @@ BUILD_COMMAND = [
     "-v",
     "--mountpoints=/proc",
 ]
+BUILD_COMMAND = ["gear", "--commit", *HASHER_ARGS]
 
 
 class BuildError(ValueError):
     """Invalid repository or failed preparation before invoking the builder."""
 
 
-def _run_builder(root: Path, output) -> int:
+class BuildInterrupted(Exception):
+    def __init__(self, signum: int):
+        self.status = 128 + signum
+
+
+def run_build_command(command, root: Path, output, *, stop_on_signal=False) -> int:
     with subprocess.Popen(
-        BUILD_COMMAND,
+        command,
         cwd=root,
         stdin=subprocess.DEVNULL,
         stdout=output,
@@ -36,8 +40,11 @@ def _run_builder(root: Path, output) -> int:
         start_new_session=True,
     ) as process:
         previous = {}
+        interrupted = None
 
         def forward(signum, _frame):
+            nonlocal interrupted
+            interrupted = signum
             try:
                 os.killpg(process.pid, signum)
             except ProcessLookupError:
@@ -48,6 +55,8 @@ def _run_builder(root: Path, output) -> int:
                 for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                     previous[signum] = signal.signal(signum, forward)
             status = process.wait()
+            if stop_on_signal and interrupted is not None:
+                raise BuildInterrupted(interrupted)
             return status if status >= 0 else 128 - status
         finally:
             for signum, handler in previous.items():
@@ -189,7 +198,7 @@ def build_package(directory: str, log_file: str) -> int:
                     relative_log,
                 )
             stage_changes(root)
-            return _run_builder(root, output)
+            return run_build_command(BUILD_COMMAND, root, output)
         except (OSError, BuildError) as error:
             output.write(f"ERROR: {error}\n".encode())
             return 1
