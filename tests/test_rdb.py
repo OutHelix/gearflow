@@ -4,7 +4,13 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-from gearflow.rdb import dependency_url, query_rebuilds, rebuild_candidates
+from gearflow.rdb import (
+    SourceRelease,
+    dependency_url,
+    local_rebuild_plan,
+    query_rebuilds,
+    rebuild_candidates,
+)
 
 
 class RdbTests(unittest.TestCase):
@@ -90,3 +96,33 @@ class RdbTests(unittest.TestCase):
                 ["lib-first", "lib-second"],
             )
             self.assertEqual(request.call_args.kwargs["timeout"], 120)
+
+    def test_local_plan_filters_only_the_failing_versions_in_rdb_order(self):
+        packages = self.data()
+        for row in packages["dependencies"]:
+            row.update(version="2", release="alt1")
+        ftbfs = {
+            "length": 2,
+            "ftbfs": [
+                {"name": "lib-first", "version": "2", "release": "alt1"},
+                {"name": "lib-second", "version": "1", "release": "alt1"},
+            ],
+        }
+        settings = ("https://example.invalid/api", "1", "both", "sisyphus", "demo")
+        with patch("gearflow.rdb._request_json", side_effect=[packages, ftbfs]) as get:
+            self.assertEqual(
+                local_rebuild_plan(*settings, ftbfs=False),
+                [SourceRelease("lib-second", "2", "alt1")],
+            )
+            self.assertTrue(
+                get.call_args.args[0].endswith("/export/beehive/ftbfs?branch=sisyphus")
+            )
+        with patch("gearflow.rdb._request_json", return_value=packages) as get:
+            self.assertEqual(
+                local_rebuild_plan(*settings, ftbfs=True),
+                [
+                    SourceRelease("lib-first", "2", "alt1"),
+                    SourceRelease("lib-second", "2", "alt1"),
+                ],
+            )
+            get.assert_called_once()
