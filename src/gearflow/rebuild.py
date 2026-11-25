@@ -1,4 +1,4 @@
-"""Persist and run a local queue of gear rebuilds."""
+"""Persist and run a local queue of package rebuilds."""
 
 import json
 import os
@@ -108,7 +108,8 @@ def _load(directory: Path) -> tuple[list[SourceRelease], list[str]]:
 
 
 def _result_line(index: int, total: int, package: SourceRelease, status: str) -> str:
-    return f"[{index}/{total}] {package.name}.git={package.tag} {status}"
+    width = len(str(total))
+    return f"[{index:>{width}}/{total}] {status:<8} {package.name}.git={package.tag}"
 
 
 def _write_log(
@@ -124,14 +125,11 @@ def _write_log(
     )
 
 
-def _build(directory: Path, package: SourceRelease) -> int:
-    destination = directory / f"{package.name}.git"
-    if destination.is_symlink():
-        raise ValueError(f"unexpected symlink: {destination}")
-    if not destination.exists():
-        name = quote(package.name, safe="")
-        url = f"https://git.altlinux.org/gears/{name[0]}/{name}.git"
-        # Publish the checkout only after a successful clone. Resume can reuse it.
+def _clone(directory: Path, destination: Path, package: SourceRelease) -> int:
+    name = quote(package.name, safe="")
+    for collection in ("gears", "srpms"):
+        url = f"https://git.altlinux.org/{collection}/{name[0]}/{name}.git"
+        # A failed attempt cannot leave a partial checkout for the next source.
         with tempfile.TemporaryDirectory(prefix=".clone-", dir=directory) as temp:
             checkout = Path(temp) / "package"
             status = run_build_command(
@@ -140,9 +138,22 @@ def _build(directory: Path, package: SourceRelease) -> int:
                 None,
                 stop_on_signal=True,
             )
-            if status:
-                return status
-            checkout.rename(destination)
+            if status == 0:
+                checkout.rename(destination)
+                return 0
+        if collection == "gears":
+            print(f"{package.name}: trying the SRPM repository", flush=True)
+    return status
+
+
+def _build(directory: Path, package: SourceRelease) -> int:
+    destination = directory / f"{package.name}.git"
+    if destination.is_symlink():
+        raise ValueError(f"unexpected symlink: {destination}")
+    if not destination.exists():
+        status = _clone(directory, destination, package)
+        if status:
+            return status
     command = [
         "gear",
         f"--tree-ish=refs/tags/{package.tag}",

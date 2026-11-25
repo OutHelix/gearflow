@@ -14,7 +14,7 @@ class LocalRebuildTests(unittest.TestCase):
             SourceRelease("missing", "1", "alt1"),
             SourceRelease("broken", "2", "alt2"),
             SourceRelease("paused", "3", "alt3"),
-            SourceRelease("last", "4", "alt4"),
+            SourceRelease("cglib", "3.3.0", "alt1_7jpp11"),
         ]
         attempts = []
 
@@ -27,12 +27,18 @@ class LocalRebuildTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     (cwd / rebuild.LOG).read_text().splitlines()[-1],
-                    f"[{plan.index(package) + 1}/4] {package.name}.git={package.tag} BUILDING",
+                    f"[{plan.index(package) + 1}/4] BUILDING {package.name}.git={package.tag}",
                 )
-                attempts.append(("clone", url.split("/")[-1]))
-                self.assertTrue(url.startswith("https://git.altlinux.org/gears/"))
-                if url.endswith("/missing.git"):
+                origin = url.split("/")[3]
+                attempts.append((origin, f"{package.name}.git"))
+                self.assertIn(origin, ("gears", "srpms"))
+                self.assertEqual(command[command.index("--branch") + 1], package.tag)
+                if package.name == "missing" or (
+                    package.name == "cglib" and origin == "gears"
+                ):
+                    Path(target).mkdir()
                     return 128
+                self.assertFalse(Path(target).exists())
                 Path(target).mkdir()
                 return 0
             attempts.append(("build", cwd.name))
@@ -73,9 +79,9 @@ class LocalRebuildTests(unittest.TestCase):
                 self.assertEqual(
                     (work / rebuild.LOG).read_text().splitlines(),
                     [
-                        "[1/4] missing.git=1-alt1 FAILED",
-                        "[2/4] broken.git=2-alt2 FAILED",
-                        "[3/4] paused.git=3-alt3 BUILDING",
+                        "[1/4] FAILED   missing.git=1-alt1",
+                        "[2/4] FAILED   broken.git=2-alt2",
+                        "[3/4] BUILDING paused.git=3-alt3",
                     ],
                 )
                 (work / rebuild.LOG).write_text("stale log\n")
@@ -87,22 +93,38 @@ class LocalRebuildTests(unittest.TestCase):
             self.assertEqual(
                 (work / rebuild.LOG).read_text().splitlines(),
                 [
-                    "[1/4] missing.git=1-alt1 FAILED",
-                    "[2/4] broken.git=2-alt2 FAILED",
-                    "[3/4] paused.git=3-alt3 DONE",
-                    "[4/4] last.git=4-alt4 DONE",
+                    "[1/4] FAILED   missing.git=1-alt1",
+                    "[2/4] FAILED   broken.git=2-alt2",
+                    "[3/4] DONE     paused.git=3-alt3",
+                    "[4/4] DONE     cglib.git=3.3.0-alt1_7jpp11",
                 ],
             )
             self.assertEqual(
                 attempts,
                 [
-                    ("clone", "missing.git"),
-                    ("clone", "broken.git"),
+                    ("gears", "missing.git"),
+                    ("srpms", "missing.git"),
+                    ("gears", "broken.git"),
                     ("build", "broken.git"),
-                    ("clone", "paused.git"),
+                    ("gears", "paused.git"),
                     ("build", "paused.git"),
                     ("build", "paused.git"),
-                    ("clone", "last.git"),
-                    ("build", "last.git"),
+                    ("gears", "cglib.git"),
+                    ("srpms", "cglib.git"),
+                    ("build", "cglib.git"),
                 ],
             )
+
+    def test_log_columns_stay_aligned_as_index_grows(self):
+        release = SourceRelease("cglib", "3.3.0", "alt1_7jpp11")
+        self.assertEqual(
+            [
+                rebuild._result_line(index, 194, release, status)
+                for index, status in [(1, "DONE"), (10, "FAILED"), (194, "BUILDING")]
+            ],
+            [
+                "[  1/194] DONE     cglib.git=3.3.0-alt1_7jpp11",
+                "[ 10/194] FAILED   cglib.git=3.3.0-alt1_7jpp11",
+                "[194/194] BUILDING cglib.git=3.3.0-alt1_7jpp11",
+            ],
+        )
