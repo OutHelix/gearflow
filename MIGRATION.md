@@ -22,7 +22,7 @@ The existing MIT license covers both codebases. Monitoring source now lives unde
 | `gear-update-upstream --prepare-package DIR` | `gearflow prepare DIR` |
 | `gear-update-upstream --resume DIR` | `gearflow resume DIR` |
 | `gear-update-upstream --progress DIR` | `gearflow progress DIR` |
-| `gear-update-upstream --scan-task 123 --dry-run` | `gearflow rebuild 123 --dry-run` |
+| `gear-update-upstream --scan-task 123 --dry-run` | `gearflow task rebuild 123 --dry-run` |
 
 `gearflow update DIR` uses an existing local checkout. Monitoring commands never
 start the package update workflow. `gearflow` without arguments prints help.

@@ -1,97 +1,91 @@
 # gearflow
 
-Release checks, security advisories, package updates and build tasks for ALT Linux
-maintainers. Checks GitHub tags and OSV, builds gear packages with hasher and
-tracks Girar tasks. No third-party Python runtime dependencies.
+CLI для сопровождающих пакеты ALT Linux. Проверяет релизы GitHub и уязвимости по OSV, показывает задания Girar, обновляет и собирает gear-пакеты.
 
-## Install
+## Команды
 
-Download `gearflow-linux-x86_64` from [Releases](https://github.com/OutHelix/gearflow/releases/latest)
-for Linux x86_64 (glibc 2.35+). Python is included:
+| Команда | Действие |
+| --- | --- |
+| `gearflow check [PACKAGE ...]` | Проверить обновления или уязвимости пакетов сопровождающего. |
+| `gearflow task` | Показать задания сопровождающего в Girar. По умолчанию показывает все ветки и скрывает задания в состоянии `DONE`. |
+| `gearflow task show ID` | Показать задание по ID с архитектурами, источниками и одобрениями. |
+| `gearflow task rebuild [TASK]` | Построить по RDB план пересборки и после подтверждения добавить пакеты в задание Girar. |
+| `gearflow update [DIR\|URL]` | Слить тег upstream, обновить файлы упаковки и собрать пакет. После подтверждения опубликовать пакет в Gitery и перейти к отправке в Girar. |
+| `gearflow prepare [DIR\|URL]` | Подготовить структуру пакета. Удаляет `import.info`, переносит файлы упаковки в `altlinux/` и фиксирует изменения коммитами. |
+| `gearflow check-layout [DIR]` | Проверить структуру пакета. |
+| `gearflow migrate-layout [DIR]` | Перенести файлы упаковки в `altlinux/` и создать коммит. |
+| `gearflow build [DIR] --log FILE` | Добавить изменения в индекс и собрать пакет в hasher. |
+| `gearflow publish [DIR] --gitery-only` | Создать или переиспользовать коммит упаковки, пересоздать подписанный тег и принудительно отправить ветку и тег в Gitery. Меняет `origin`. |
+| `gearflow resume [DIR]` | Продолжить сохранённое обновление или публикацию. |
+| `gearflow progress [DIR]` | Показать этапы текущего или последнего завершённого обновления. |
+| `gearflow rebuild` | Выбрать gear-пакет в текущем каталоге и локально пересобрать его обратные зависимости в порядке RDB. |
+| `gearflow workflow-help` | Показать справку по расширенным режимам и устаревшим флагам. |
 
-```sh
-chmod +x gearflow-linux-x86_64
-mkdir -p ~/.local/bin
-install -m 755 gearflow-linux-x86_64 ~/.local/bin/gearflow
-gearflow --version
-```
+Аргументы в квадратных скобках можно опустить. `DIR` по умолчанию — текущий каталог. `update` и `prepare` могут запросить URL, а `task rebuild` — ID задания. `-h` / `--help` показывает справку, `--version` — версию.
 
-Alternatively, install the Python package with Python 3.9+. From the project directory:
+## Флаги мониторинга
 
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install .
-```
+Для `check`, `task` и `task show` доступны `--json` для вывода массива JSON, `--color MODE` с режимами `auto`, `always`, `never` и `--no-color` для отключения цвета.
 
-Release checks need Git; package builds need gear and hasher. The full update and
-publication workflow also requires Bash 4.4+, SSH, `gear-store-tags`, `gear-commit`,
-`gear-create-tag`, `add_changelog`, working signing and SSH hosts `gitery`/`gyle`.
+### `check`
 
-## Usage
+В обычном режиме сравнивает версии пакетов из ALTRepo с тегами GitHub. OSV проверяет версии upstream без учёта бэкпортов ALT.
 
-```sh
-gearflow check -m scala --updates-only
-gearflow check -m scala --vulnerable-only
-gearflow task -m scala --all
-gearflow task -m scala -w 3
-gearflow task show 435564
-```
+| Флаг | Действие |
+| --- | --- |
+| `-m`, `--maintainer LOGIN` | Обязательный логин сопровождающего. |
+| `-b`, `--branch BRANCH` | Ветка ALT. По умолчанию `sisyphus`. |
+| `--acl MODE` | Отбор по адресу упаковщика (`none`, по умолчанию) или по ACL (`by_nick`, `by_nick_leader`, `by_nick_or_group`, `by_nick_leader_and_group`). |
+| `-p`, `--package PATTERN` | Имя или glob с учётом регистра. Можно повторять и сочетать с позиционными шаблонами. |
+| `-g`, `--group GROUP` | Категория RPM. Можно указать несколько категорий повторением флага. |
+| `-u`, `--updates-only` | Скрыть строки `OK`. |
+| `--hide-skipped` | Скрыть строки `SKIP`, сохранив их число в сводке. |
+| `--include-prereleases` | Учитывать предварительные версии. |
+| `--vulnerable-only` | Показать совпадения с записями OSV. |
+| `--vuln-details` | Добавить описания, серьёзность и версии с исправлениями. Требует `--vulnerable-only`. |
+| `--osv-package PACKAGE=ECOSYSTEM:NAME` | Задать идентификатор компонента в OSV. |
+| `--repo PACKAGE=OWNER/REPO` | Задать репозиторий GitHub для пакета. |
+| `--tag-regex PACKAGE=REGEX` | Задать шаблон полного имени тега с именованной группой `version`. |
+| `--current-version PACKAGE=VERSION` | Переопределить исходную версию пакета. |
+| `--config FILE` | Указать JSON-файл с настройками пакетов. |
+| `-j`, `--jobs N` | Число параллельных проверок. По умолчанию 1, максимум 2. |
+| `--timeout SECONDS`, `--package-timeout SECONDS` | Лимит запроса и общий лимит на пакет соответственно. Оба по 15 секунд. |
+| `--sort`, `--show-repo`, `--no-progress` | Сортировать по имени, показывать репозиторий GitHub, скрыть счётчик проверок соответственно. |
 
-Replace `scala` with your maintainer login. Checks default to Sisyphus; task lists
-cover all branches and exclude DONE. Add `--json` or `--no-color` to checks and
-task commands. Watch mode stops with `q` or Ctrl+C. OSV checks upstream versions
-and cannot account for ALT backports.
+### `task` и `task show`
 
-## Prepare, build, publish
+| Флаг | Действие |
+| --- | --- |
+| `-m`, `--maintainer LOGIN` | Владелец заданий. Обязателен для списка, необязателен для сверки владельца в `task show`. |
+| `-b`, `-r`, `--branch`, `--repo BRANCHES` | Ветка, список веток через запятую или `ALL`. |
+| `-s`, `--state STATES` | Состояния через запятую. Для просмотра завершённых заданий укажите `DONE`. |
+| `-p`, `--package PATTERN` | Подстрока или glob имени пакета без учёта регистра. Можно повторять. |
+| `-n`, `--limit N` | Ограничить число заданий после сортировки. По умолчанию 0, без ограничения. |
+| `--days N` | Отобрать задания, созданные за последние N календарных дней, включая сегодня. |
+| `--sort FIELD`, `--reverse` | Выбрать поле сортировки или изменить порядок на обратный. Поля — `time` (по умолчанию, по свежести журнала сборки), `id`, `package`, `state`, `branch`. |
+| `--arch`, `--source`, `--approvals`, `--all` | Показать архитектуры, источники, одобрения или все эти сведения сразу. |
+| `-w`, `--watch [SECONDS]` | Обновлять вывод каждые 30 секунд по умолчанию, минимум раз в 3 секунды. Несовместим с `--json`. Выход по `q` или Ctrl+C. |
+| `--timeout SECONDS` | Лимит запроса. По умолчанию 15 секунд. |
 
-For updates, prepare metadata first:
+Для `task show` доступны общие флаги вывода, `--maintainer`, `--timeout` и режим наблюдения. Для наблюдения укажите `--watch` перед `show`.
 
-```sh
-gearflow update --prepare-only ./maven
-```
+## Флаги обновления и сборки
 
-This stops after merge, rules/spec/changelog and stored tags, with progress saved
-before the build. Inspect patches and restore disabled components, then build:
+| Команда | Флаг | Действие |
+| --- | --- | --- |
+| `update` | `--prepare-only` | Слить тег и обновить файлы упаковки и сохранённые теги. Остановиться перед сборкой. |
+| `update` | `--resume` | Продолжить с сохранённого этапа. |
+| `update` | `--resume-after-merge` | Продолжить после ручного слияния. Запрашивает тег, версию и следующий этап. |
+| `update` | `--continue` | Продолжить сохранённый процесс. Если прогресса нет, выбрать режим сборки по изменению `Version` относительно `HEAD`. |
+| `update` | `--continue-update`, `--continue-fix` | При отсутствии прогресса собрать и опубликовать пакет в режиме обновления или исправления. Режим обновления освежает сохранённые теги gear. |
+| `build` | `--log FILE` | Обязательный путь к журналу. Оба потока сборки пишутся в файл, который перезаписывается при каждой попытке. |
+| `publish` | `--gitery-only` | Обязательный флаг публикации только в Gitery. |
+| `task rebuild` | `--dry-run` | Показать план без изменения или запуска задания Girar. |
+| `rebuild` | `--with-ftbfs`, `--without-ftbfs` | Включить или исключить версии, которые уже падают в Beehive. Без флага команда спросит. |
+| `rebuild` | `--resume` | Продолжить сохранённую очередь. Прерванная сборка запускается заново. |
 
-```sh
-gearflow build ./maven --log /tmp/maven-build.log
-```
+Флаги `--resume*` и `--continue*` взаимоисключающие и работают с локальным репозиторием. `--prepare-only` несовместим с `--continue*`.
 
-`build` stages the prepared tree and writes both output streams to the log without
-terminal output. It overwrites the log on each attempt, returns the builder's exit
-code and stops after hasher. Use it directly for initial builds and retries; no
-release tag or saved update is required. Build logs and editor backups are excluded
-from staging. An unusable or protected log destination is reported on stderr.
+Локальный `rebuild` использует выбранный пакет для поиска обратных зависимостей в RDB. Зависимости клонируются по тегам версий из RDB и последовательно собираются через `hsh`. В каталоге `<пакет>-rebuild` хранятся клоны, очередь в `progress.json` и журнал `rebuild.log`. В журнале текущий пакет получает статус `BUILDING` перед клонированием. После завершения статус меняется на `DONE` или `FAILED`, при прерывании остаётся `BUILDING`. Ошибка отдельного пакета не останавливает очередь. При возобновлении используется сохранённый список, включая выбор FTBFS.
 
-Review the exit status and log before publishing:
-
-```sh
-gearflow publish ./maven --gitery-only
-```
-
-Publication stages current fixes and runs `gear-commit`. If the tree is clean and
-`HEAD` has the default `Version-Release` commit subject, publication uses that commit.
-It recreates the signed tag, switches `origin` to `gitery:packages/<package>` and
-force-pushes the `sisyphus` branch and release tag. It does not build or submit to
-Girar. Retry an interrupted publication with the same command or
-`gearflow resume ./maven`.
-
-For the complete interactive update/build/Girar workflow, use `gearflow update DIR`
-or `gearflow update URL`. Other helpers: `prepare`, `check-layout`, `migrate-layout`,
-`progress` and `rebuild TASK --dry-run`. The latter reads Girar/RDB and displays a
-rebuild plan without modifying the task; dependency plans are not ABI comparisons.
-
-Run `gearflow COMMAND --help` for options or `gearflow workflow-help` for advanced
-modes and environment settings. The `repokeep` compatibility command remains
-available; see [migration notes](MIGRATION.md).
-
-## Development
-
-```sh
-python3 -m unittest discover -s tests -t .
-```
-
-Tests use fixtures, temporary Git repositories and local HTTP servers.
-See [development notes](DEVELOPMENT.md), [fixture provenance](tests/monitor/fixtures/README.md),
-[changelog](CHANGELOG.md) and [improvement ideas](SUGGESTIONS.md). [MIT License](LICENSE).
+[Совместимость с repokeep](MIGRATION.md) · [Разработка](DEVELOPMENT.md) · [История изменений](CHANGELOG.md) · [Лицензия MIT](LICENSE)
