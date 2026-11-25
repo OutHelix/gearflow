@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.6 — 2026-11-25
+
+- Build the selected package, initialize hasher once, and build dependencies
+  with `hsh`. Save preparation progress.
+- Add `rebuild --clear` to remove local rebuild directories after confirmation.
+- Fall back to the SRPM import repository when a rebuild tag cannot be cloned
+  from the gear repository.
+- Align rebuild log columns and show the status before the package and version.
+
 ## 0.0.5 — 2026-11-25
 
 - Move Girar reverse dependency planning and submission to `task rebuild`.

@@ -10,15 +10,12 @@ from pathlib import Path
 from typing import Optional
 
 LOG_CONFIG_KEY = "gearflow.build-log"
-HASHER_ARGS = [
-    "--hasher",
-    "--",
-    "hsh",
+HSH_OPTIONS = [
     "--no-sisyphus-check=gpg",
     "-v",
     "--mountpoints=/proc",
 ]
-BUILD_COMMAND = ["gear", "--commit", *HASHER_ARGS]
+BUILD_COMMAND = ["gear", "--commit", "--hasher", "--", "hsh", *HSH_OPTIONS]
 
 
 class BuildError(ValueError):

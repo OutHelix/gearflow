@@ -23,6 +23,8 @@ class UnifiedCliTests(unittest.TestCase):
             ["rebuild", "123"],
             ["rebuild", "--with-ftbfs", "--without-ftbfs"],
             ["rebuild", "--resume", "--with-ftbfs"],
+            ["rebuild", "--resume", "--clear"],
+            ["rebuild", "--clear", "--without-ftbfs"],
             ["update", "--resume", "https://example.invalid/demo.git"],
             ["update", "--resume", "--continue"],
             ["update", "--prepare-only", "--continue", "."],
@@ -113,6 +115,15 @@ class UnifiedCliTests(unittest.TestCase):
             ):
                 self.assertEqual(cli.main(["rebuild", *flags]), 0)
                 run.assert_called_once_with(Path.cwd(), resume=resume, ftbfs=ftbfs)
+
+    def test_clear_dispatches_without_starting_a_rebuild(self):
+        with (
+            patch("gearflow.rebuild.clear_rebuilds", return_value=1) as clear,
+            patch("gearflow.rebuild.rebuild_packages") as run,
+        ):
+            self.assertEqual(cli.main(["rebuild", "--clear"]), 1)
+            clear.assert_called_once_with(Path.cwd())
+            run.assert_not_called()
 
     def test_update_uses_selected_local_directory(self):
         with tempfile.TemporaryDirectory(prefix="gearflow local package ") as repo:

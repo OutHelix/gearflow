@@ -127,6 +127,11 @@ def parser() -> argparse.ArgumentParser:
         help="continue the saved local rebuild, retrying an interrupted package",
     )
     rebuild_mode.add_argument(
+        "--clear",
+        action="store_true",
+        help="ask before deleting each local rebuild directory",
+    )
+    rebuild_mode.add_argument(
         "--with-ftbfs",
         dest="ftbfs",
         action="store_true",
@@ -219,8 +224,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return launch_update([*prefix, target])
         root.error(f"repository directory not found: {target}")
     if options.command == "rebuild":
-        from .rebuild import rebuild_packages
+        from .rebuild import clear_rebuilds, rebuild_packages
 
+        if options.clear:
+            return clear_rebuilds(Path.cwd())
         return rebuild_packages(Path.cwd(), resume=options.resume, ftbfs=options.ftbfs)
     mode = WORKFLOW_MODES[options.command][0]
     return launch_update(
